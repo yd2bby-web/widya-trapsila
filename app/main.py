@@ -41,9 +41,22 @@ def health():
 @app.post("/api/auth/login")
 def login(payload: LoginInput, db: Session = Depends(get_db)):
     user = db.scalar(select(User).where(User.username == payload.username))
+
+    print("LOGIN CHECK:", {
+        "username": payload.username,
+        "user_found": user is not None,
+        "is_active": user.is_active if user else None,
+        "password_match": verify_password(payload.password, user.password_hash) if user else False
+    })
+
     if not user or not user.is_active or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Username atau password tidak sesuai")
-    return {"access_token":create_access_token(str(user.id), user.role), "token_type":"bearer", "user":UserOut.model_validate(user)}
+
+    return {
+        "access_token": create_access_token(str(user.id), user.role),
+        "token_type": "bearer",
+        "user": UserOut.model_validate(user)
+    }
 
 def current_user(credentials: HTTPAuthorizationCredentials | None = Depends(bearer), db: Session = Depends(get_db)) -> User:
     if not credentials: raise HTTPException(status_code=401, detail="Silakan login")
