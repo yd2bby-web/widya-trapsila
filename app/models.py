@@ -35,7 +35,11 @@ class Officer(Base):
     full_name: Mapped[str] = mapped_column(String(160))
     class_name: Mapped[str | None] = mapped_column(String(30), nullable=True)
     period: Mapped[str] = mapped_column(String(30), default="2026/2027")
+    duties: Mapped[str | None] = mapped_column(Text, nullable=True)
+    photo_data: Mapped[str | None] = mapped_column(Text, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    duties: Mapped[str | None] = mapped_column(Text, nullable=True)
+    photo_data: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 class Program(Base):

@@ -7,9 +7,10 @@ from dotenv import load_dotenv
 load_dotenv()
 from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from openpyxl import load_workbook
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, text
 from sqlalchemy.orm import Session
 from jwt import InvalidTokenError
 from .database import Base, engine, get_db, SessionLocal
@@ -31,8 +32,14 @@ with engine.begin() as conn:
             conn.execute(text("ALTER TABLE users ADD COLUMN password_change_required BOOLEAN NOT NULL DEFAULT FALSE"))
         else:
             conn.execute(text("ALTER TABLE users ADD COLUMN password_change_required BOOLEAN NOT NULL DEFAULT 0"))
+    officer_columns = {col["name"] for col in inspect(engine).get_columns("officers")}
+    if "duties" not in officer_columns:
+        conn.execute(text("ALTER TABLE officers ADD COLUMN duties TEXT"))
+    if "photo_data" not in officer_columns:
+        conn.execute(text("ALTER TABLE officers ADD COLUMN photo_data TEXT"))
 
-app = FastAPI(title="WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", version="0.4.0")
+app = FastAPI(title="WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", version="0.5.0")
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 bearer = HTTPBearer(auto_error=False)
 
 @app.on_event("startup")
@@ -46,12 +53,28 @@ def create_bootstrap_admin():
         if not db.scalar(select(User).where(User.username == username)):
             db.add(User(username=username, full_name="Administrator WIDYA TRAPSILA", password_hash=hash_password(password), role="super_admin"))
             db.commit()
+        chair = db.scalar(select(Officer).where(
+            Officer.position == "Ketua PIK-R",
+            Officer.full_name == "KHANSA PUTRI"
+        ))
+        if not chair:
+            db.add(Officer(
+                position="Ketua PIK-R",
+                full_name="KHANSA PUTRI",
+                class_name="8C",
+                period="Belum ditetapkan",
+                duties="Memimpin organisasi PIK-R WIDYA TRAPSILA dan mengoordinasikan pelaksanaan program kerja.",
+                photo_data="/static/media/khansa_putri.jpeg",
+                sort_order=1,
+                is_active=True
+            ))
+            db.commit()
     finally:
         db.close()
 
 @app.get("/api/health")
 def health():
-    return {"status":"ok", "app":"WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", "version":"0.4.0"}
+    return {"status":"ok", "app":"WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", "version":"0.5.0"}
 
 
 @app.post("/api/auth/login")
@@ -226,10 +249,18 @@ def list_students(q: str=Query(default="",max_length=100), class_name: str=Query
 def student_count(user: User=Depends(require_admin), db: Session=Depends(get_db)):
     return {"total_siswa":db.query(Student).filter(Student.is_active.is_(True)).count()}
 
+@app.get("/api/public/officers")
+def public_officers(db: Session = Depends(get_db)):
+    rows = db.scalars(select(Officer).where(Officer.is_active.is_(True)).order_by(Officer.sort_order, Officer.id)).all()
+    return [{"id": x.id, "position": x.position, "full_name": x.full_name,
+             "class_name": x.class_name, "period": x.period,
+             "duties": x.duties, "photo_data": x.photo_data} for x in rows]
+
+
 @app.get("/api/admin/officers")
 def list_officers(user: User=Depends(require_admin), db: Session=Depends(get_db)):
     rows=db.scalars(select(Officer).where(Officer.is_active.is_(True)).order_by(Officer.sort_order,Officer.id)).all()
-    return [{"id":x.id,"position":x.position,"full_name":x.full_name,"class_name":x.class_name,"period":x.period} for x in rows]
+    return [{"id":x.id,"position":x.position,"full_name":x.full_name,"class_name":x.class_name,"period":x.period,"duties":x.duties,"photo_data":x.photo_data} for x in rows]
 
 @app.post("/api/admin/officers")
 def add_officer(payload: OfficerInput, user: User=Depends(require_admin), db: Session=Depends(get_db)):

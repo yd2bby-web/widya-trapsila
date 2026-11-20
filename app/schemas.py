@@ -27,6 +27,8 @@ class OfficerInput(BaseModel):
     class_name: str | None = None
     period: str = "2026/2027"
     sort_order: int = 0
+    duties: str | None = None
+    photo_data: str | None = None
 
 class ProgramInput(BaseModel):
     title: str
