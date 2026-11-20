@@ -11,6 +11,7 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255))
     role: Mapped[str] = mapped_column(String(30), default="student", index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    password_change_required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
     student_id: Mapped[int | None] = mapped_column(ForeignKey("students.id"), nullable=True, unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     student: Mapped["Student | None"] = relationship(back_populates="user")

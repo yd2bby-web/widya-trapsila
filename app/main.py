@@ -1,4 +1,6 @@
 import os
+import secrets
+import string
 from io import BytesIO
 from pathlib import Path
 from dotenv import load_dotenv
@@ -19,13 +21,26 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "static"
 TEMPLATE_FILE = BASE_DIR / "student_template.xlsx"
 Base.metadata.create_all(bind=engine)
-app = FastAPI(title="WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", version="0.3.0")
+
+# Additive migration for existing SQLite/Neon databases.
+from sqlalchemy import inspect, text
+with engine.begin() as conn:
+    columns = {col["name"] for col in inspect(engine).get_columns("users")}
+    if "password_change_required" not in columns:
+        if engine.dialect.name == "postgresql":
+            conn.execute(text("ALTER TABLE users ADD COLUMN password_change_required BOOLEAN NOT NULL DEFAULT FALSE"))
+        else:
+            conn.execute(text("ALTER TABLE users ADD COLUMN password_change_required BOOLEAN NOT NULL DEFAULT 0"))
+
+app = FastAPI(title="WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", version="0.4.0")
 bearer = HTTPBearer(auto_error=False)
 
 @app.on_event("startup")
 def create_bootstrap_admin():
     username = os.getenv("BOOTSTRAP_ADMIN_USERNAME", "admin")
-    password = os.getenv("BOOTSTRAP_ADMIN_PASSWORD", "ChangeThis-Immediately-123!")
+    password = os.getenv("BOOTSTRAP_ADMIN_PASSWORD", "")
+    if not password:
+        raise RuntimeError("BOOTSTRAP_ADMIN_PASSWORD wajib dikonfigurasi")
     db = SessionLocal()
     try:
         if not db.scalar(select(User).where(User.username == username)):
@@ -36,22 +51,13 @@ def create_bootstrap_admin():
 
 @app.get("/api/health")
 def health():
-    return {"status":"ok", "app":"WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", "version":"0.3.0"}
+    return {"status":"ok", "app":"WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", "version":"0.4.0"}
 
 
 @app.post("/api/auth/login")
 def login(payload: LoginInput, db: Session = Depends(get_db)):
     user = db.scalar(select(User).where(User.username == payload.username))
 
-    bootstrap_password = os.getenv("BOOTSTRAP_ADMIN_PASSWORD", "")
-
-    print("LOGIN DIAGNOSTIC:", {
-        "user_found": user is not None,
-        "is_active": user.is_active if user else None,
-        "input_matches_database": verify_password(payload.password, user.password_hash) if user else False,
-        "bootstrap_matches_database": verify_password(bootstrap_password, user.password_hash) if user and bootstrap_password else False,
-        "input_matches_bootstrap": payload.password == bootstrap_password if bootstrap_password else False
-    })
 
     if not user or not user.is_active or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Username atau password tidak sesuai")
@@ -59,7 +65,8 @@ def login(payload: LoginInput, db: Session = Depends(get_db)):
     return {
         "access_token": create_access_token(str(user.id), user.role),
         "token_type": "bearer",
-        "user": UserOut.model_validate(user)
+        "user": UserOut.model_validate(user),
+        "password_change_required": user.password_change_required
     }
 
 
@@ -79,6 +86,98 @@ def require_admin(user: User = Depends(current_user)) -> User:
 
 @app.get("/api/auth/me")
 def me(user: User = Depends(current_user)): return UserOut.model_validate(user)
+
+
+@app.post("/api/auth/change-password")
+def change_password(payload: dict, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    old_password = str(payload.get("old_password", ""))
+    new_password = str(payload.get("new_password", ""))
+    if not verify_password(old_password, user.password_hash):
+        raise HTTPException(status_code=400, detail="Password lama tidak sesuai")
+    if len(new_password) < 10:
+        raise HTTPException(status_code=400, detail="Password baru minimal 10 karakter")
+    if new_password == old_password:
+        raise HTTPException(status_code=400, detail="Password baru harus berbeda")
+    user.password_hash = hash_password(new_password)
+    user.password_change_required = False
+    db.commit()
+    return {"message": "Password berhasil diperbarui"}
+
+
+@app.get("/api/admin/student-accounts")
+def list_student_accounts(user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    rows = db.execute(
+        select(Student, User)
+        .outerjoin(User, User.student_id == Student.id)
+        .where(Student.is_active.is_(True))
+        .order_by(Student.class_name, Student.full_name)
+    ).all()
+    return [{
+        "student_id": student.id,
+        "nis": student.nis,
+        "full_name": student.full_name,
+        "class_name": student.class_name,
+        "has_account": account is not None,
+        "account_active": account.is_active if account else False,
+        "password_change_required": account.password_change_required if account else None
+    } for student, account in rows]
+
+
+@app.post("/api/admin/student-accounts/create")
+def create_student_accounts(user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    alphabet = string.ascii_letters + string.digits
+    students = db.scalars(
+        select(Student)
+        .where(Student.is_active.is_(True))
+        .order_by(Student.class_name, Student.full_name)
+    ).all()
+    created = []
+    for student in students:
+        existing = db.scalar(select(User).where(
+            or_(User.student_id == student.id, User.username == student.nis)
+        ))
+        if existing:
+            continue
+        # Random one-time initial password; never use NIS as password.
+        initial_password = ''.join(secrets.choice(alphabet) for _ in range(14))
+        account = User(
+            username=student.nis,
+            full_name=student.full_name,
+            password_hash=hash_password(initial_password),
+            role="student",
+            is_active=True,
+            student_id=student.id,
+            password_change_required=True
+        )
+        db.add(account)
+        created.append({
+            "nis": student.nis,
+            "nama": student.full_name,
+            "kelas": student.class_name,
+            "password_awal": initial_password
+        })
+    db.commit()
+    return {
+        "dibuat": len(created),
+        "dilewati": len(students) - len(created),
+        "akun": created,
+        "catatan": "Simpan/unduh daftar ini sekarang. Password awal hanya ditampilkan satu kali."
+    }
+
+
+@app.get("/api/student/me")
+def student_me(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    if user.role != "student" or not user.student_id:
+        raise HTTPException(status_code=403, detail="Akses khusus akun siswa")
+    student = db.get(Student, user.student_id)
+    if not student or not student.is_active:
+        raise HTTPException(status_code=403, detail="Data siswa tidak aktif")
+    return {
+        "nis": student.nis,
+        "nama": student.full_name,
+        "kelas": student.class_name,
+        "password_change_required": user.password_change_required
+    }
 
 @app.get("/api/admin/students/template")
 @app.get("/api/students/template")
