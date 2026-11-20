@@ -35,6 +35,75 @@ input,select,textarea,.field{max-width:100%}
 
 
 .officer-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:14px;margin-top:14px}.officer-card{display:flex;gap:14px;align-items:center;padding:14px;border:1px solid #e5ebf3;border-radius:14px;background:#fff;min-width:0}.officer-photo{width:104px;height:132px;object-fit:cover;object-position:center 25%;border-radius:10px;flex:0 0 auto}.officer-info{min-width:0}.officer-info h4{font-size:18px;margin:8px 0}.officer-info p{margin:5px 0;overflow-wrap:anywhere}@media(max-width:520px){.officer-card{align-items:flex-start}.officer-photo{width:88px;height:112px}}
+
+/* WIDYA TRAPSILA v0.5.1 - compact spacing */
+.top{padding:16px 18px 42px}
+.top h1{font-size:clamp(23px,4vw,34px);margin:6px 0 3px}
+.main{margin:-24px auto 22px;padding:0 12px}
+.panel{padding:18px;border-radius:16px}
+.panel h2{font-size:clamp(21px,3vw,28px);margin:4px 0 8px}
+.panel h3{font-size:19px;margin:14px 0 8px}
+.grid{gap:9px;margin-top:12px}
+.tile,.stat{padding:12px;border-radius:12px}
+.tile b{margin:5px 0 3px}
+.login,.toolbar{gap:8px;margin:10px 0}
+.field{padding:9px 10px}
+.btn{padding:9px 13px}
+.layout{gap:12px;margin-top:12px}
+.sidebar{padding:8px}
+.navbtn{padding:8px 9px;margin:1px 0}
+.head{gap:8px;margin-bottom:10px}
+.stats{gap:8px}
+.stat strong{font-size:23px;margin-top:3px}
+.formgrid{gap:7px;margin:8px 0}
+.drop{padding:12px}
+footer{padding:14px}
+.officer-cards{gap:9px;margin-top:9px}
+.officer-card{gap:10px;padding:10px}
+.officer-photo{width:82px;height:104px}
+.officer-info h4{font-size:16px;margin:4px 0}
+.officer-info p{margin:3px 0}
+@media(max-width:760px){
+ .top{padding:13px 14px 34px}
+ .top h1{font-size:24px}
+ .top p{font-size:13px;line-height:1.35}
+ .main{margin:-18px auto 14px;padding:0 8px}
+ .panel{padding:12px;border-radius:14px}
+ .panel h2{font-size:21px;margin:2px 0 6px}
+ .panel h3{font-size:17px;margin:10px 0 6px}
+ .muted{font-size:12px;line-height:1.35}
+ .grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:9px}
+ .tile,.stat{padding:9px;border-radius:11px;font-size:13px}
+ .tile b{font-size:14px;margin:4px 0 2px}
+ .layout{gap:8px;margin-top:9px}
+ .sidebar{padding:6px;gap:1px}
+ .navbtn{font-size:12px;padding:7px 6px}
+ .head{margin-bottom:8px}
+ .stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+ .stat span{font-size:11px}
+ .stat strong{font-size:20px}
+ .login,.toolbar{gap:7px;margin:8px 0}
+ .login>*{min-width:0;flex:1 1 100%}
+ .field{padding:8px 9px;font-size:14px}
+ .btn{padding:8px 11px;font-size:13px}
+ .notice{font-size:11px;margin-top:7px}
+ .formgrid{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin:7px 0}
+ .drop{padding:9px}
+ th,td{padding:6px 5px;font-size:11px}
+ .officer-cards{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+ .officer-card{display:block;padding:8px}
+ .officer-photo{width:100%;height:120px;object-position:center 24%;margin-bottom:5px}
+ .officer-info h4{font-size:14px}
+ .officer-info p{font-size:11px}
+ footer{padding:10px;font-size:10px}
+}
+@media(max-width:360px){
+ .grid{grid-template-columns:1fr}
+ .officer-cards{grid-template-columns:1fr}
+ .officer-card{display:flex}
+ .officer-photo{width:72px;height:92px}
+}
+
 </style></head><body>
 <header class="top"><div class="wrap"><div class="brand">SMP NEGERI 1 WONOGIRI</div><h1>WIDYA TRAPSILA</h1><p>PIK-R DIGITAL CENTER · Pusat Informasi dan Konseling Remaja</p></div></header>
 <main class="main"><section id="public" class="panel"><h2>Selamat datang di WIDYA TRAPSILA</h2><p class="muted">Pusat informasi, edukasi, dan kegiatan remaja SMP Negeri 1 Wonogiri.</p><div class="grid"><div class="tile">📚<b>Edukasi Remaja</b><span class="muted">Informasi dan materi positif untuk remaja.</span></div><div class="tile">📅<b>Agenda Kegiatan</b><span class="muted">Program dan kegiatan PIK-R.</span></div><div class="tile">🤝<b>Organisasi</b><span class="muted">Kenali WIDYA TRAPSILA dan kepengurusannya.</span></div><div class="tile">💬<b>Aspirasi Siswa</b><span class="muted">Ruang saran dan gagasan siswa.</span></div></div><section class="officer-public" style="margin-top:24px"><h3>Pengurus WIDYA TRAPSILA</h3><div id="publicOfficerCards" class="officer-cards"><p class="muted">Memuat profil pengurus...</p></div></section><h3>Login Administrator</h3><form id="loginForm" class="login"><input class="field" id="username" placeholder="Username" autocomplete="username" required><div class="password-wrap"><input class="field" id="password" type="password" placeholder="Password" autocomplete="current-password" required><button type="button" id="togglePassword" class="toggle-password" aria-label="Tampilkan password" title="Tampilkan password">👁</button></div><button class="btn">Masuk</button></form><div id="loginNotice" class="notice">Portal publik dapat dibaca seluruh siswa. Pengelolaan memerlukan akun sesuai hak akses.</div></section>
