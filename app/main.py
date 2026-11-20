@@ -38,15 +38,19 @@ def create_bootstrap_admin():
 def health():
     return {"status":"ok", "app":"WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", "version":"0.3.0"}
 
+
 @app.post("/api/auth/login")
 def login(payload: LoginInput, db: Session = Depends(get_db)):
     user = db.scalar(select(User).where(User.username == payload.username))
 
-    print("LOGIN CHECK:", {
-        "username": payload.username,
+    bootstrap_password = os.getenv("BOOTSTRAP_ADMIN_PASSWORD", "")
+
+    print("LOGIN DIAGNOSTIC:", {
         "user_found": user is not None,
         "is_active": user.is_active if user else None,
-        "password_match": verify_password(payload.password, user.password_hash) if user else False
+        "input_matches_database": verify_password(payload.password, user.password_hash) if user else False,
+        "bootstrap_matches_database": verify_password(bootstrap_password, user.password_hash) if user and bootstrap_password else False,
+        "input_matches_bootstrap": payload.password == bootstrap_password if bootstrap_password else False
     })
 
     if not user or not user.is_active or not verify_password(payload.password, user.password_hash):
@@ -57,6 +61,7 @@ def login(payload: LoginInput, db: Session = Depends(get_db)):
         "token_type": "bearer",
         "user": UserOut.model_validate(user)
     }
+
 
 def current_user(credentials: HTTPAuthorizationCredentials | None = Depends(bearer), db: Session = Depends(get_db)) -> User:
     if not credentials: raise HTTPException(status_code=401, detail="Silakan login")
