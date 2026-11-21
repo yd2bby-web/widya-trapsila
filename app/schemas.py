@@ -3,6 +3,7 @@ from pydantic import BaseModel, ConfigDict
 class LoginInput(BaseModel):
     username: str
     password: str
+    role: str = "admin"
 
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)

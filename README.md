@@ -1,8 +1,8 @@
-# WIDYA TRAPSILA v0.9.0
+# WIDYA TRAPSILA v0.9.1
 
 Pembaruan manajemen administrasi dan pembatasan akses komunikasi.
 
-## Perubahan v0.9.0
+## Perubahan v0.9.1
 - Data Siswa: edit, aktif/nonaktif, dan hapus dengan perlindungan relasi akun serta riwayat konseling.
 - Akun Siswa: aktif/nonaktif, reset password sementara, dan hapus akun; riwayat chat yang terhubung mencegah penghapusan permanen.
 - Pengurus: mempertahankan edit, aktif/nonaktif, dan hapus.
@@ -28,3 +28,9 @@ Pembaruan manajemen administrasi dan pembatasan akses komunikasi.
 
 ## Catatan pengujian
 Pemeriksaan sintaks Python dan JavaScript dilakukan pada paket ini. Uji integrasi langsung terhadap Neon, Cloudflare R2, dan deploy Render tetap perlu dilakukan pada lingkungan proyek pemilik.
+
+
+## v0.9.1
+- Dashboard siswa memiliki panel Pengumuman yang dikelola administrator.
+- Login menampilkan pilihan Administrator, Siswa, dan Konselor serta memvalidasi role di server.
+- Kartu pengurus publik hanya menampilkan foto yang benar-benar diunggah; tidak memakai foto pengganti.

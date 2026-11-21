@@ -10,6 +10,7 @@ from urllib.parse import quote
 from io import BytesIO
 from pathlib import Path
 from dotenv import load_dotenv
+from pydantic import BaseModel
 load_dotenv()
 from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
@@ -20,7 +21,7 @@ from sqlalchemy import select, or_, text, case, func
 from sqlalchemy.orm import Session
 from jwt import InvalidTokenError
 from .database import Base, engine, get_db, SessionLocal
-from .models import Student, User, Officer, Program, DownloadFile, ChatMessage, CounselingMessage
+from .models import Student, User, Officer, Program, DownloadFile, ChatMessage, CounselingMessage, Announcement
 from .schemas import LoginInput, UserOut, OfficerInput, ProgramInput
 from .security import create_access_token, decode_access_token, hash_password, verify_password
 
@@ -237,7 +238,7 @@ def send_counseling_message(student_id: int, payload: dict, user: User = Depends
 
 @app.get("/api/health")
 def health():
-    return {"status":"ok", "app":"WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", "version":"0.9.0"}
+    return {"status":"ok", "app":"WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", "version":"0.9.1"}
 
 
 @app.post("/api/auth/login")
@@ -247,6 +248,10 @@ def login(payload: LoginInput, db: Session = Depends(get_db)):
 
     if not user or not user.is_active or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Username atau password tidak sesuai")
+    requested_role = payload.role
+    role_aliases = {"admin": {"admin", "super_admin"}, "student": {"student"}, "counselor": {"counselor"}}
+    if requested_role not in role_aliases or user.role not in role_aliases[requested_role]:
+        raise HTTPException(status_code=403, detail="Jenis akun tidak sesuai dengan pilihan login.")
 
     return {
         "access_token": create_access_token(str(user.id), user.role),
@@ -512,6 +517,48 @@ def officer_ordering():
     )
     return (chair_priority, Officer.sort_order, Officer.id)
 
+
+class AnnouncementInput(BaseModel):
+    title: str
+    body: str
+    category: str = "Informasi Umum"
+    is_active: bool = True
+    is_pinned: bool = False
+
+@app.get("/api/student/announcements")
+def student_announcements(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    if user.role != "student":
+        raise HTTPException(status_code=403, detail="Akses khusus siswa.")
+    rows = db.scalars(select(Announcement).where(Announcement.is_active.is_(True)).order_by(Announcement.is_pinned.desc(), Announcement.published_at.desc(), Announcement.id.desc())).all()
+    return [{"id": x.id, "title": x.title, "body": x.body, "category": x.category, "is_pinned": x.is_pinned, "published_at": x.published_at.isoformat() if x.published_at else None} for x in rows]
+
+@app.get("/api/admin/announcements")
+def admin_announcements(user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    rows = db.scalars(select(Announcement).order_by(Announcement.published_at.desc(), Announcement.id.desc())).all()
+    return [{"id": x.id, "title": x.title, "body": x.body, "category": x.category, "is_active": x.is_active, "is_pinned": x.is_pinned, "published_at": x.published_at.isoformat() if x.published_at else None} for x in rows]
+
+@app.post("/api/admin/announcements")
+def create_announcement(payload: AnnouncementInput, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    title, body = payload.title.strip(), payload.body.strip()
+    if not title or not body: raise HTTPException(status_code=400, detail="Judul dan isi pengumuman wajib diisi.")
+    row = Announcement(title=title, body=body, category=payload.category.strip() or "Informasi Umum", is_active=payload.is_active, is_pinned=payload.is_pinned)
+    db.add(row); db.commit(); db.refresh(row)
+    return {"id": row.id, "message": "Pengumuman berhasil disimpan."}
+
+@app.put("/api/admin/announcements/{announcement_id}")
+def update_announcement(announcement_id: int, payload: AnnouncementInput, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    row = db.get(Announcement, announcement_id)
+    if not row: raise HTTPException(status_code=404, detail="Pengumuman tidak ditemukan.")
+    title, body = payload.title.strip(), payload.body.strip()
+    if not title or not body: raise HTTPException(status_code=400, detail="Judul dan isi pengumuman wajib diisi.")
+    row.title=title; row.body=body; row.category=payload.category.strip() or "Informasi Umum"; row.is_active=payload.is_active; row.is_pinned=payload.is_pinned
+    db.commit(); return {"message": "Pengumuman berhasil diperbarui."}
+
+@app.delete("/api/admin/announcements/{announcement_id}")
+def delete_announcement(announcement_id: int, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    row = db.get(Announcement, announcement_id)
+    if not row: raise HTTPException(status_code=404, detail="Pengumuman tidak ditemukan.")
+    db.delete(row); db.commit(); return {"message": "Pengumuman berhasil dihapus."}
 
 @app.get("/api/public/officers")
 def public_officers(db: Session = Depends(get_db)):
