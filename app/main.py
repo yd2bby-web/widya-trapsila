@@ -1,6 +1,10 @@
 import os
 import secrets
 import string
+import re
+import mimetypes
+import uuid
+from urllib.parse import quote
 from io import BytesIO
 from pathlib import Path
 from dotenv import load_dotenv
@@ -14,7 +18,7 @@ from sqlalchemy import select, or_, text
 from sqlalchemy.orm import Session
 from jwt import InvalidTokenError
 from .database import Base, engine, get_db, SessionLocal
-from .models import Student, User, Officer, Program
+from .models import Student, User, Officer, Program, DownloadFile
 from .schemas import LoginInput, UserOut, OfficerInput, ProgramInput
 from .security import create_access_token, decode_access_token, hash_password, verify_password
 
@@ -38,7 +42,7 @@ with engine.begin() as conn:
     if "photo_data" not in officer_columns:
         conn.execute(text("ALTER TABLE officers ADD COLUMN photo_data TEXT"))
 
-app = FastAPI(title="WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", version="0.5.0")
+app = FastAPI(title="WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", version="0.6.0")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 bearer = HTTPBearer(auto_error=False)
 
@@ -74,7 +78,7 @@ def create_bootstrap_admin():
 
 @app.get("/api/health")
 def health():
-    return {"status":"ok", "app":"WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", "version":"0.5.0"}
+    return {"status":"ok", "app":"WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", "version":"0.6.0"}
 
 
 @app.post("/api/auth/login")
@@ -288,6 +292,147 @@ def delete_program(program_id:int,user:User=Depends(require_admin),db:Session=De
     item=db.get(Program,program_id)
     if not item: raise HTTPException(status_code=404,detail="Program tidak ditemukan")
     db.delete(item); db.commit(); return {"message":"Program kerja dihapus"}
+
+
+# PUSAT DOWNLOAD — private Cloudflare R2 bucket, authenticated temporary download URLs.
+DOWNLOAD_MAX_BYTES = 25 * 1024 * 1024
+DOWNLOAD_ALLOWED = {
+    ".pdf": "application/pdf",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xls": "application/vnd.ms-excel",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".ppt": "application/vnd.ms-powerpoint",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+    ".webp": "image/webp",
+    ".txt": "text/plain",
+}
+
+def r2_client():
+    required = ["R2_ENDPOINT_URL", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET_NAME"]
+    missing = [name for name in required if not os.getenv(name)]
+    if missing:
+        raise HTTPException(status_code=503, detail="Penyimpanan dokumen belum dikonfigurasi. Hubungi administrator.")
+    try:
+        import boto3
+        return boto3.client(
+            "s3", endpoint_url=os.environ["R2_ENDPOINT_URL"],
+            aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],
+            aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
+            region_name="auto",
+        )
+    except Exception:
+        raise HTTPException(status_code=503, detail="Layanan penyimpanan dokumen belum siap.")
+
+def download_item_json(item: DownloadFile):
+    return {
+        "id": item.id, "title": item.title, "category": item.category,
+        "description": item.description, "original_name": item.original_name,
+        "content_type": item.content_type, "file_size": item.file_size,
+        "created_at": item.created_at.isoformat() if item.created_at else None,
+    }
+
+@app.get("/api/downloads")
+def list_downloads(category: str = Query(default="", max_length=80),
+                   user: User = Depends(current_user), db: Session = Depends(get_db)):
+    stmt = select(DownloadFile).order_by(DownloadFile.created_at.desc(), DownloadFile.id.desc())
+    if category.strip():
+        stmt = stmt.where(DownloadFile.category == category.strip())
+    rows = db.scalars(stmt).all()
+    return [download_item_json(item) for item in rows]
+
+@app.post("/api/admin/downloads")
+async def upload_download_file(
+    title: str = Query(..., min_length=2, max_length=180),
+    category: str = Query(..., min_length=2, max_length=80),
+    description: str = Query(default="", max_length=1000),
+    file: UploadFile = File(...),
+    user: User = Depends(require_admin), db: Session = Depends(get_db),
+):
+    original = Path(file.filename or "").name
+    ext = Path(original).suffix.lower()
+    if ext not in DOWNLOAD_ALLOWED:
+        raise HTTPException(status_code=400, detail="Format file belum didukung.")
+    content = await file.read(DOWNLOAD_MAX_BYTES + 1)
+    if not content:
+        raise HTTPException(status_code=400, detail="File kosong.")
+    if len(content) > DOWNLOAD_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="Ukuran file maksimal 25 MB.")
+    content_type = DOWNLOAD_ALLOWED[ext]
+    supplied_type = (file.content_type or "").split(";")[0].lower()
+    if supplied_type and supplied_type not in {content_type, "application/octet-stream"}:
+        raise HTTPException(status_code=400, detail="Tipe file tidak sesuai dengan ekstensinya.")
+    safe_category = re.sub(r"[^\w -]", "", category.strip(), flags=re.UNICODE)[:80]
+    safe_title = title.strip()
+    if not safe_category or len(safe_category) < 2:
+        raise HTTPException(status_code=400, detail="Kategori wajib diisi.")
+    object_key = f"widya-trapsila/downloads/{uuid.uuid4().hex}{ext}"
+    client = r2_client()
+    try:
+        client.put_object(Bucket=os.environ["R2_BUCKET_NAME"], Key=object_key, Body=content,
+                          ContentType=content_type, Metadata={"original-name": quote(original[:200])})
+    except Exception:
+        raise HTTPException(status_code=502, detail="Gagal menyimpan file ke penyimpanan cloud.")
+    item = DownloadFile(title=safe_title, category=safe_category,
+                        description=description.strip() or None, original_name=original[:255],
+                        object_key=object_key, content_type=content_type, file_size=len(content),
+                        uploaded_by=user.id)
+    try:
+        db.add(item); db.commit(); db.refresh(item)
+    except Exception:
+        db.rollback()
+        try: client.delete_object(Bucket=os.environ["R2_BUCKET_NAME"], Key=object_key)
+        except Exception: pass
+        raise HTTPException(status_code=500, detail="Metadata file gagal disimpan.")
+    return {"message": "Dokumen berhasil diunggah.", "file": download_item_json(item)}
+
+@app.get("/api/downloads/{file_id}/url")
+def get_download_url(file_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    item = db.get(DownloadFile, file_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Dokumen tidak ditemukan.")
+    client = r2_client()
+    try:
+        url = client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": os.environ["R2_BUCKET_NAME"], "Key": item.object_key,
+                    "ResponseContentDisposition": f"attachment; filename*=UTF-8''{quote(item.original_name)}",
+                    "ResponseContentType": item.content_type},
+            ExpiresIn=600,
+        )
+    except Exception:
+        raise HTTPException(status_code=502, detail="Link unduhan belum dapat dibuat.")
+    return {"url": url, "expires_in": 600}
+
+@app.patch("/api/admin/downloads/{file_id}")
+def update_download_file(file_id: int, payload: dict, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    item = db.get(DownloadFile, file_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Dokumen tidak ditemukan.")
+    title = str(payload.get("title", item.title)).strip()
+    category = str(payload.get("category", item.category)).strip()
+    description = str(payload.get("description", item.description or "")).strip()
+    if len(title) < 2 or len(title) > 180 or len(category) < 2 or len(category) > 80 or len(description) > 1000:
+        raise HTTPException(status_code=400, detail="Judul/kategori tidak valid atau keterangan terlalu panjang.")
+    item.title = title
+    item.category = re.sub(r"[^\w -]", "", category, flags=re.UNICODE)[:80]
+    item.description = description or None
+    db.commit()
+    return {"message": "Informasi dokumen berhasil diperbarui.", "file": download_item_json(item)}
+
+@app.delete("/api/admin/downloads/{file_id}")
+def delete_download_file(file_id: int, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    item = db.get(DownloadFile, file_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Dokumen tidak ditemukan.")
+    client = r2_client()
+    try:
+        client.delete_object(Bucket=os.environ["R2_BUCKET_NAME"], Key=item.object_key)
+    except Exception:
+        raise HTTPException(status_code=502, detail="File cloud gagal dihapus; data tetap dipertahankan.")
+    db.delete(item); db.commit()
+    return {"message": "Dokumen berhasil dihapus."}
 
 @app.get("/")
 def home(): return FileResponse(str(STATIC_DIR/"index.html"))
