@@ -73,3 +73,11 @@ Buat bucket R2 private dan token API dengan izin Object Read & Write hanya untuk
 - Menandai panel Pusat Download secara eksplisit agar tampil pada dashboard siswa.
 - Daftar dokumen dimuat saat dashboard siswa dibuka; filter kategori tetap tersedia.
 - Akses unduh tetap menggunakan endpoint terautentikasi.
+
+
+## v0.7.0 – Chat Universal
+- Ruang chat grup bersama untuk akun siswa dan pengelola yang sudah login.
+- Pesan tersimpan di database Neon/PostgreSQL.
+- Pembaruan otomatis berkala setiap 5 detik (tanpa WebSocket).
+- Admin dapat memoderasi dengan menghapus pesan.
+- Batas pesan 1.000 karakter; teks ditampilkan sebagai teks biasa untuk mencegah injeksi HTML.

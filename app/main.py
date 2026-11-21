@@ -4,6 +4,7 @@ import string
 import re
 import mimetypes
 import uuid
+from datetime import datetime
 from urllib.parse import quote
 from io import BytesIO
 from pathlib import Path
@@ -18,7 +19,7 @@ from sqlalchemy import select, or_, text
 from sqlalchemy.orm import Session
 from jwt import InvalidTokenError
 from .database import Base, engine, get_db, SessionLocal
-from .models import Student, User, Officer, Program, DownloadFile
+from .models import Student, User, Officer, Program, DownloadFile, ChatMessage
 from .schemas import LoginInput, UserOut, OfficerInput, ProgramInput
 from .security import create_access_token, decode_access_token, hash_password, verify_password
 
@@ -42,7 +43,7 @@ with engine.begin() as conn:
     if "photo_data" not in officer_columns:
         conn.execute(text("ALTER TABLE officers ADD COLUMN photo_data TEXT"))
 
-app = FastAPI(title="WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", version="0.6.0")
+app = FastAPI(title="WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", version="0.7.0")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 bearer = HTTPBearer(auto_error=False)
 
@@ -78,7 +79,7 @@ def create_bootstrap_admin():
 
 @app.get("/api/health")
 def health():
-    return {"status":"ok", "app":"WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", "version":"0.6.0"}
+    return {"status":"ok", "app":"WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", "version":"0.7.0"}
 
 
 @app.post("/api/auth/login")
@@ -110,6 +111,48 @@ def current_user(credentials: HTTPAuthorizationCredentials | None = Depends(bear
 def require_admin(user: User = Depends(current_user)) -> User:
     if user.role not in {"super_admin", "admin"}: raise HTTPException(status_code=403, detail="Akses khusus administrator")
     return user
+
+@app.get("/api/chat/messages")
+def list_chat_messages(before_id: int | None = Query(default=None, ge=1),
+                       limit: int = Query(default=100, ge=1, le=100),
+                       user: User = Depends(current_user), db: Session = Depends(get_db)):
+    stmt = select(ChatMessage).order_by(ChatMessage.id.desc()).limit(limit)
+    if before_id:
+        stmt = stmt.where(ChatMessage.id < before_id)
+    rows = list(db.scalars(stmt).all())
+    rows.reverse()
+    return [{"id": m.id, "sender_name": m.sender_name, "sender_class": m.sender_class,
+             "sender_role": m.sender_role, "message": m.message,
+             "created_at": m.created_at.isoformat() if m.created_at else None,
+             "mine": m.user_id == user.id} for m in rows]
+
+@app.post("/api/chat/messages")
+def send_chat_message(payload: dict, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    message = str(payload.get("message", "")).strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="Pesan tidak boleh kosong.")
+    if len(message) > 1000:
+        raise HTTPException(status_code=400, detail="Pesan maksimal 1.000 karakter.")
+    student = user.student
+    sender_name = student.full_name if student else user.full_name
+    sender_class = student.class_name if student else None
+    row = ChatMessage(user_id=user.id, sender_name=sender_name, sender_class=sender_class,
+                      sender_role=user.role, message=message, created_at=datetime.utcnow())
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {"id": row.id, "sender_name": row.sender_name, "sender_class": row.sender_class,
+            "sender_role": row.sender_role, "message": row.message,
+            "created_at": row.created_at.isoformat(), "mine": True}
+
+@app.delete("/api/admin/chat/messages/{message_id}")
+def delete_chat_message(message_id: int, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    row = db.get(ChatMessage, message_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Pesan tidak ditemukan.")
+    db.delete(row)
+    db.commit()
+    return {"message": "Pesan berhasil dihapus."}
 
 @app.get("/api/auth/me")
 def me(user: User = Depends(current_user)): return UserOut.model_validate(user)

@@ -52,6 +52,16 @@ class Program(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
+    sender_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    sender_class: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    sender_role: Mapped[str] = mapped_column(String(30), default="student", nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
 class DownloadFile(Base):
     __tablename__ = "download_files"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
