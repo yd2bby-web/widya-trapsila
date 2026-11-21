@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from openpyxl import load_workbook
-from sqlalchemy import select, or_, text
+from sqlalchemy import select, or_, text, case, func
 from sqlalchemy.orm import Session
 from jwt import InvalidTokenError
 from .database import Base, engine, get_db, SessionLocal
@@ -377,9 +377,23 @@ def list_students(q: str=Query(default="",max_length=100), class_name: str=Query
 def student_count(user: User=Depends(require_admin), db: Session=Depends(get_db)):
     return {"total_siswa":db.query(Student).filter(Student.is_active.is_(True)).count()}
 
+def officer_ordering():
+    # Jabatan Ketua selalu ditampilkan paling atas, terlepas dari urutan
+    # pembuatan atau pengeditan data. Urutan manual tetap berlaku setelahnya.
+    chair_priority = case(
+        (func.lower(func.trim(Officer.position)).in_(("ketua", "ketua pik-r", "ketua pikr")), 0),
+        else_=1,
+    )
+    return (chair_priority, Officer.sort_order, Officer.id)
+
+
 @app.get("/api/public/officers")
 def public_officers(db: Session = Depends(get_db)):
-    rows = db.scalars(select(Officer).where(Officer.is_active.is_(True)).order_by(Officer.sort_order, Officer.id)).all()
+    rows = db.scalars(
+        select(Officer)
+        .where(Officer.is_active.is_(True))
+        .order_by(*officer_ordering())
+    ).all()
     return [{"id": x.id, "position": x.position, "full_name": x.full_name,
              "class_name": x.class_name, "period": x.period,
              "duties": x.duties, "photo_data": x.photo_data} for x in rows]
@@ -387,7 +401,7 @@ def public_officers(db: Session = Depends(get_db)):
 
 @app.get("/api/admin/officers")
 def list_officers(user: User=Depends(require_admin), db: Session=Depends(get_db)):
-    rows=db.scalars(select(Officer).order_by(Officer.sort_order,Officer.id)).all()
+    rows=db.scalars(select(Officer).order_by(*officer_ordering())).all()
     return [{"id":x.id,"position":x.position,"full_name":x.full_name,"class_name":x.class_name,"period":x.period,"duties":x.duties,"photo_data":x.photo_data,"sort_order":x.sort_order,"is_active":x.is_active} for x in rows]
 
 @app.post("/api/admin/officers")
