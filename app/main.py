@@ -369,7 +369,7 @@ def list_students(q: str=Query(default="",max_length=100), class_name: str=Query
     if class_name.strip(): stmt=stmt.where(Student.class_name==class_name.strip())
     total=db.query(Student).filter(Student.is_active.is_(True)).count()
     items=db.scalars(stmt.order_by(Student.class_name,Student.full_name).offset(offset).limit(limit)).all()
-    return {"total":total,"ditampilkan":len(items),"data":[{"nis":s.nis,"nama":s.full_name,"kelas":s.class_name,"nisn":s.nisn} for s in items]}
+    return {"total":total,"ditampilkan":len(items),"data":[{"id":s.id,"nis":s.nis,"nama":s.full_name,"kelas":s.class_name,"nisn":s.nisn} for s in items]}
 
 @app.get("/api/admin/students/count")
 def student_count(user: User=Depends(require_admin), db: Session=Depends(get_db)):
