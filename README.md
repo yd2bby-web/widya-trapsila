@@ -81,3 +81,10 @@ Buat bucket R2 private dan token API dengan izin Object Read & Write hanya untuk
 - Pembaruan otomatis berkala setiap 5 detik (tanpa WebSocket).
 - Admin dapat memoderasi dengan menghapus pesan.
 - Batas pesan 1.000 karakter; teks ditampilkan sebagai teks biasa untuk mencegah injeksi HTML.
+
+
+## v0.7.1 – Chat polling fix
+
+- Define `stopChatPolling()` and initialize `chatPollTimer` before login/dashboard transitions.
+- Prevents `stopChatPolling is not defined` when an administrator logs in or a session returns to the login screen.
+- No database migration or new environment variables required.

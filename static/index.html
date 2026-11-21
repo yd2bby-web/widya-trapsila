@@ -128,6 +128,13 @@ footer{padding:14px}
 </section></main><footer>WIDYA TRAPSILA · PIK-R SMP NEGERI 1 WONOGIRI</footer>
 <script>
 const $=id=>document.getElementById(id);let token=sessionStorage.getItem('pikr_token');
+let chatPollTimer=null;
+function stopChatPolling(){
+  if(chatPollTimer!==null){
+    clearInterval(chatPollTimer);
+    chatPollTimer=null;
+  }
+}
 $('togglePassword').addEventListener('click',()=>{
   const input=$('password');
   const show=input.type==='password';
