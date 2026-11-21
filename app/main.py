@@ -385,13 +385,30 @@ def public_officers(db: Session = Depends(get_db)):
 
 @app.get("/api/admin/officers")
 def list_officers(user: User=Depends(require_admin), db: Session=Depends(get_db)):
-    rows=db.scalars(select(Officer).where(Officer.is_active.is_(True)).order_by(Officer.sort_order,Officer.id)).all()
-    return [{"id":x.id,"position":x.position,"full_name":x.full_name,"class_name":x.class_name,"period":x.period,"duties":x.duties,"photo_data":x.photo_data} for x in rows]
+    rows=db.scalars(select(Officer).order_by(Officer.sort_order,Officer.id)).all()
+    return [{"id":x.id,"position":x.position,"full_name":x.full_name,"class_name":x.class_name,"period":x.period,"duties":x.duties,"photo_data":x.photo_data,"sort_order":x.sort_order,"is_active":x.is_active} for x in rows]
 
 @app.post("/api/admin/officers")
 def add_officer(payload: OfficerInput, user: User=Depends(require_admin), db: Session=Depends(get_db)):
     item=Officer(**payload.model_dump()); db.add(item); db.commit(); db.refresh(item)
     return {"id":item.id,"message":"Pengurus berhasil ditambahkan"}
+
+@app.put("/api/admin/officers/{officer_id}")
+def update_officer(officer_id:int,payload:OfficerInput,user:User=Depends(require_admin),db:Session=Depends(get_db)):
+    item=db.get(Officer,officer_id)
+    if not item: raise HTTPException(status_code=404,detail="Pengurus tidak ditemukan")
+    data=payload.model_dump(exclude_unset=True)
+    for key,value in data.items(): setattr(item,key,value)
+    db.commit(); db.refresh(item)
+    return {"id":item.id,"message":"Data pengurus berhasil diperbarui"}
+
+@app.patch("/api/admin/officers/{officer_id}/status")
+def set_officer_status(officer_id:int,payload:dict,user:User=Depends(require_admin),db:Session=Depends(get_db)):
+    item=db.get(Officer,officer_id)
+    if not item: raise HTTPException(status_code=404,detail="Pengurus tidak ditemukan")
+    if "is_active" not in payload: raise HTTPException(status_code=422,detail="Status is_active wajib diisi")
+    item.is_active=bool(payload["is_active"]); db.commit()
+    return {"message":"Status pengurus diperbarui"}
 
 @app.delete("/api/admin/officers/{officer_id}")
 def delete_officer(officer_id:int,user:User=Depends(require_admin),db:Session=Depends(get_db)):
@@ -566,11 +583,6 @@ def delete_download_file(file_id: int, user: User = Depends(require_admin), db: 
         raise HTTPException(status_code=502, detail="File cloud gagal dihapus; data tetap dipertahankan.")
     db.delete(item); db.commit()
     return {"message": "Dokumen berhasil dihapus."}
-
-@app.get("/service-worker.js", include_in_schema=False)
-def service_worker():
-    return FileResponse(str(BASE_DIR / "service-worker.js"), media_type="application/javascript",
-                        headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
 
 @app.get("/")
 def home(): return FileResponse(str(STATIC_DIR/"index.html"))
