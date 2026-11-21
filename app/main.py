@@ -52,7 +52,7 @@ with engine.begin() as conn:
     if "counselor_user_id" not in student_cols:
         conn.execute(text("ALTER TABLE students ADD COLUMN counselor_user_id INTEGER REFERENCES users(id)" if engine.dialect.name == "postgresql" else "ALTER TABLE students ADD COLUMN counselor_user_id INTEGER REFERENCES users(id)"))
 
-app = FastAPI(title="WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", version="0.8.1")
+app = FastAPI(title="WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", version="0.9.0")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 bearer = HTTPBearer(auto_error=False)
 
@@ -69,6 +69,21 @@ def current_user(credentials: HTTPAuthorizationCredentials | None = Depends(bear
 def require_admin(user: User = Depends(current_user)) -> User:
     if user.role not in {"super_admin", "admin"}: raise HTTPException(status_code=403, detail="Akses khusus administrator")
     return user
+
+
+def _is_active_officer(user: User, db: Session) -> bool:
+    if user.role in {"super_admin", "admin"}:
+        return True
+    if user.role != "student" or not user.student_id:
+        return False
+    student = db.get(Student, user.student_id)
+    if not student or not student.is_active:
+        return False
+    return db.scalar(select(Officer.id).where(
+        Officer.is_active.is_(True),
+        func.lower(func.trim(Officer.full_name)) == student.full_name.strip().lower(),
+        func.lower(func.trim(Officer.class_name)) == student.class_name.strip().lower()
+    )) is not None
 
 
 @app.on_event("startup")
@@ -118,8 +133,43 @@ def create_counselor(payload: dict, user: User = Depends(require_admin), db: Ses
 
 @app.get("/api/admin/counselors")
 def list_counselors(user: User = Depends(require_admin), db: Session = Depends(get_db)):
-    rows = db.scalars(select(User).where(User.role == "counselor", User.is_active.is_(True)).order_by(User.full_name)).all()
-    return [{"id": c.id, "username": c.username, "full_name": c.full_name, "assigned_students": db.query(Student).filter(Student.counselor_user_id == c.id).count()} for c in rows]
+    rows = db.scalars(select(User).where(User.role == "counselor").order_by(User.full_name)).all()
+    return [{"id": c.id, "username": c.username, "full_name": c.full_name, "is_active": c.is_active, "assigned_students": db.query(Student).filter(Student.counselor_user_id == c.id).count()} for c in rows]
+
+@app.put("/api/admin/counselors/{counselor_id}")
+def update_counselor(counselor_id: int, payload: dict, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    item = db.get(User, counselor_id)
+    if not item or item.role != "counselor": raise HTTPException(status_code=404, detail="Konselor tidak ditemukan.")
+    name = str(payload.get("full_name", item.full_name)).strip()
+    username = str(payload.get("username", item.username)).strip()
+    if not name or not username: raise HTTPException(status_code=400, detail="Nama dan username wajib diisi.")
+    duplicate = db.scalar(select(User).where(User.username == username, User.id != item.id))
+    if duplicate: raise HTTPException(status_code=409, detail="Username sudah digunakan.")
+    item.full_name, item.username = name[:160], username[:80]
+    new_password = str(payload.get("password", ""))
+    if new_password:
+        if len(new_password) < 10: raise HTTPException(status_code=400, detail="Password minimal 10 karakter.")
+        item.password_hash = hash_password(new_password); item.password_change_required = True
+    db.commit(); return {"message": "Data konselor berhasil diperbarui."}
+
+@app.patch("/api/admin/counselors/{counselor_id}/status")
+def set_counselor_status(counselor_id: int, payload: dict, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    item = db.get(User, counselor_id)
+    if not item or item.role != "counselor": raise HTTPException(status_code=404, detail="Konselor tidak ditemukan.")
+    active = bool(payload.get("is_active"))
+    if not active and db.scalar(select(Student.id).where(Student.counselor_user_id == item.id)):
+        raise HTTPException(status_code=409, detail="Alihkan penugasan siswa terlebih dahulu sebelum menonaktifkan konselor.")
+    item.is_active = active; db.commit(); return {"message": "Status konselor diperbarui."}
+
+@app.delete("/api/admin/counselors/{counselor_id}")
+def delete_counselor(counselor_id: int, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    item = db.get(User, counselor_id)
+    if not item or item.role != "counselor": raise HTTPException(status_code=404, detail="Konselor tidak ditemukan.")
+    if db.scalar(select(Student.id).where(Student.counselor_user_id == item.id)):
+        raise HTTPException(status_code=409, detail="Konselor masih memiliki siswa binaan. Hapus/alihkan penugasan terlebih dahulu.")
+    if db.scalar(select(CounselingMessage.id).where(CounselingMessage.counselor_user_id == item.id).limit(1)):
+        raise HTTPException(status_code=409, detail="Konselor memiliki riwayat konseling. Nonaktifkan akun agar riwayat privat tetap aman.")
+    db.delete(item); db.commit(); return {"message": "Akun konselor dihapus."}
 
 @app.post("/api/admin/counselors/assign")
 def assign_counselor(payload: dict, user: User = Depends(require_admin), db: Session = Depends(get_db)):
@@ -129,6 +179,19 @@ def assign_counselor(payload: dict, user: User = Depends(require_admin), db: Ses
     if not counselor or counselor.role != "counselor" or not counselor.is_active: raise HTTPException(status_code=404, detail="Akun konselor tidak ditemukan atau tidak aktif.")
     student.counselor_user_id = counselor.id; db.commit()
     return {"message": f"Konselor {counselor.full_name} ditugaskan kepada {student.full_name}."}
+
+@app.get("/api/admin/counselors/assignments")
+def list_counselor_assignments(user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    rows = db.scalars(select(Student).where(Student.counselor_user_id.is_not(None)).order_by(Student.class_name, Student.full_name)).all()
+    return [{"student_id": s.id, "student_name": s.full_name, "class_name": s.class_name, "counselor_user_id": s.counselor_user_id, "counselor_name": (db.get(User, s.counselor_user_id).full_name if db.get(User, s.counselor_user_id) else "Tidak tersedia")} for s in rows]
+
+@app.delete("/api/admin/counselors/assign/{student_id}")
+def delete_counselor_assignment(student_id: int, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    student = db.get(Student, student_id)
+    if not student: raise HTTPException(status_code=404, detail="Siswa tidak ditemukan.")
+    if not student.counselor_user_id: raise HTTPException(status_code=404, detail="Penugasan tidak ditemukan.")
+    student.counselor_user_id = None; db.commit()
+    return {"message": "Penugasan konselor dihapus. Riwayat konseling tetap tersimpan dan tidak dihapus."}
 
 @app.get("/api/counseling/me")
 def counseling_me(user: User = Depends(current_user), db: Session = Depends(get_db)):
@@ -174,7 +237,7 @@ def send_counseling_message(student_id: int, payload: dict, user: User = Depends
 
 @app.get("/api/health")
 def health():
-    return {"status":"ok", "app":"WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", "version":"0.8.1"}
+    return {"status":"ok", "app":"WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", "version":"0.9.0"}
 
 
 @app.post("/api/auth/login")
@@ -193,10 +256,17 @@ def login(payload: LoginInput, db: Session = Depends(get_db)):
     }
 
 
+@app.get("/api/chat/access")
+def chat_access(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    allowed = _is_active_officer(user, db)
+    if not allowed: raise HTTPException(status_code=403, detail="Chat Pengurus hanya untuk administrator dan pengurus aktif WIDYA TRAPSILA.")
+    return {"allowed": True, "room": "Chat Pengurus"}
+
 @app.get("/api/chat/messages")
 def list_chat_messages(before_id: int | None = Query(default=None, ge=1),
                        limit: int = Query(default=100, ge=1, le=100),
                        user: User = Depends(current_user), db: Session = Depends(get_db)):
+    if not _is_active_officer(user, db): raise HTTPException(status_code=403, detail="Chat Pengurus hanya untuk administrator dan pengurus aktif.")
     stmt = select(ChatMessage).order_by(ChatMessage.id.desc()).limit(limit)
     if before_id:
         stmt = stmt.where(ChatMessage.id < before_id)
@@ -209,6 +279,7 @@ def list_chat_messages(before_id: int | None = Query(default=None, ge=1),
 
 @app.post("/api/chat/messages")
 def send_chat_message(payload: dict, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    if not _is_active_officer(user, db): raise HTTPException(status_code=403, detail="Chat Pengurus hanya untuk administrator dan pengurus aktif.")
     message = str(payload.get("message", "")).strip()
     if not message:
         raise HTTPException(status_code=400, detail="Pesan tidak boleh kosong.")
@@ -260,7 +331,6 @@ def list_student_accounts(user: User = Depends(require_admin), db: Session = Dep
     rows = db.execute(
         select(Student, User)
         .outerjoin(User, User.student_id == Student.id)
-        .where(Student.is_active.is_(True))
         .order_by(Student.class_name, Student.full_name)
     ).all()
     return [{
@@ -273,6 +343,30 @@ def list_student_accounts(user: User = Depends(require_admin), db: Session = Dep
         "password_change_required": account.password_change_required if account else None
     } for student, account in rows]
 
+@app.patch("/api/admin/student-accounts/{student_id}/status")
+def set_student_account_status(student_id: int, payload: dict, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    account = db.scalar(select(User).where(User.student_id == student_id, User.role == "student"))
+    if not account: raise HTTPException(status_code=404, detail="Akun siswa tidak ditemukan.")
+    student = db.get(Student, student_id)
+    active = bool(payload.get("is_active"))
+    if active and (not student or not student.is_active): raise HTTPException(status_code=409, detail="Aktifkan data siswa terlebih dahulu.")
+    account.is_active = active; db.commit(); return {"message": "Status akun siswa diperbarui."}
+
+@app.post("/api/admin/student-accounts/{student_id}/reset-password")
+def reset_student_account_password(student_id: int, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    account = db.scalar(select(User).where(User.student_id == student_id, User.role == "student"))
+    if not account: raise HTTPException(status_code=404, detail="Akun siswa tidak ditemukan.")
+    temp = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(14))
+    account.password_hash = hash_password(temp); account.password_change_required = True; db.commit()
+    return {"temporary_password": temp, "message": "Password sementara dibuat. Sampaikan secara pribadi kepada siswa."}
+
+@app.delete("/api/admin/student-accounts/{student_id}")
+def delete_student_account(student_id: int, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    account = db.scalar(select(User).where(User.student_id == student_id, User.role == "student"))
+    if not account: raise HTTPException(status_code=404, detail="Akun siswa tidak ditemukan.")
+    if db.scalar(select(ChatMessage.id).where(ChatMessage.user_id == account.id).limit(1)) or db.scalar(select(CounselingMessage.id).where(CounselingMessage.sender_user_id == account.id).limit(1)):
+        raise HTTPException(status_code=409, detail="Akun memiliki riwayat percakapan. Nonaktifkan akun agar riwayat tetap aman.")
+    db.delete(account); db.commit(); return {"message": "Akun login siswa dihapus. Data siswa tetap tersimpan."}
 
 @app.post("/api/admin/student-accounts/create")
 def create_student_accounts(user: User = Depends(require_admin), db: Session = Depends(get_db)):
@@ -365,13 +459,45 @@ async def import_students(file: UploadFile = File(...), user: User = Depends(req
 
 @app.get("/api/admin/students")
 def list_students(q: str=Query(default="",max_length=100), class_name: str=Query(default="",max_length=30), limit: int=Query(default=100,ge=1,le=500), offset: int=Query(default=0,ge=0), user: User=Depends(require_admin), db: Session=Depends(get_db)):
-    stmt=select(Student).where(Student.is_active.is_(True))
+    stmt=select(Student)
     if q.strip():
         term=f"%{q.strip()}%"; stmt=stmt.where(or_(Student.nis.ilike(term),Student.full_name.ilike(term)))
     if class_name.strip(): stmt=stmt.where(Student.class_name==class_name.strip())
-    total=db.query(Student).filter(Student.is_active.is_(True)).count()
+    total=db.query(Student).count()
     items=db.scalars(stmt.order_by(Student.class_name,Student.full_name).offset(offset).limit(limit)).all()
-    return {"total":total,"ditampilkan":len(items),"data":[{"id":s.id,"nis":s.nis,"nama":s.full_name,"kelas":s.class_name,"nisn":s.nisn} for s in items]}
+    return {"total":total,"ditampilkan":len(items),"data":[{"id":s.id,"nis":s.nis,"nama":s.full_name,"kelas":s.class_name,"nisn":s.nisn,"is_active":s.is_active} for s in items]}
+
+@app.put("/api/admin/students/{student_id}")
+def update_student(student_id: int, payload: dict, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    item = db.get(Student, student_id)
+    if not item: raise HTTPException(status_code=404, detail="Data siswa tidak ditemukan.")
+    nis = str(payload.get("nis", item.nis)).strip(); name = str(payload.get("full_name", item.full_name)).strip(); cls = str(payload.get("class_name", item.class_name)).strip(); nisn = str(payload.get("nisn", item.nisn or "")).strip() or None
+    if not nis or not name or not cls: raise HTTPException(status_code=400, detail="NIS, nama, dan kelas wajib diisi.")
+    dup = db.scalar(select(Student).where(Student.nis == nis, Student.id != item.id))
+    if dup: raise HTTPException(status_code=409, detail="NIS sudah digunakan siswa lain.")
+    item.nis, item.full_name, item.class_name, item.nisn = nis[:40], name[:160], cls[:30], nisn[:40] if nisn else None
+    account = db.scalar(select(User).where(User.student_id == item.id))
+    if account: account.username, account.full_name = item.nis, item.full_name
+    db.commit(); return {"message": "Data siswa berhasil diperbarui."}
+
+@app.patch("/api/admin/students/{student_id}/status")
+def set_student_status(student_id: int, payload: dict, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    item = db.get(Student, student_id)
+    if not item: raise HTTPException(status_code=404, detail="Data siswa tidak ditemukan.")
+    item.is_active = bool(payload.get("is_active"))
+    account = db.scalar(select(User).where(User.student_id == item.id))
+    if account: account.is_active = item.is_active
+    db.commit(); return {"message": "Status siswa dan akun terkait diperbarui."}
+
+@app.delete("/api/admin/students/{student_id}")
+def delete_student(student_id: int, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    item = db.get(Student, student_id)
+    if not item: raise HTTPException(status_code=404, detail="Data siswa tidak ditemukan.")
+    if db.scalar(select(CounselingMessage.id).where(CounselingMessage.student_id == item.id).limit(1)):
+        raise HTTPException(status_code=409, detail="Siswa memiliki riwayat konseling. Nonaktifkan data agar riwayat privat tetap aman.")
+    if db.scalar(select(User.id).where(User.student_id == item.id)):
+        raise HTTPException(status_code=409, detail="Siswa memiliki akun login. Hapus akun terlebih dahulu atau nonaktifkan data siswa.")
+    db.delete(item); db.commit(); return {"message": "Data siswa dihapus."}
 
 @app.get("/api/admin/students/count")
 def student_count(user: User=Depends(require_admin), db: Session=Depends(get_db)):
@@ -443,6 +569,13 @@ def list_programs(user:User=Depends(require_admin),db:Session=Depends(get_db)):
 def add_program(payload:ProgramInput,user:User=Depends(require_admin),db:Session=Depends(get_db)):
     item=Program(**payload.model_dump()); db.add(item); db.commit(); db.refresh(item)
     return {"id":item.id,"message":"Program kerja berhasil ditambahkan"}
+
+@app.put("/api/admin/programs/{program_id}")
+def update_program(program_id: int, payload: ProgramInput, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    item = db.get(Program, program_id)
+    if not item: raise HTTPException(status_code=404, detail="Program tidak ditemukan.")
+    for key, value in payload.model_dump().items(): setattr(item, key, value)
+    db.commit(); return {"message": "Program kerja berhasil diperbarui."}
 
 @app.delete("/api/admin/programs/{program_id}")
 def delete_program(program_id:int,user:User=Depends(require_admin),db:Session=Depends(get_db)):
@@ -588,6 +721,29 @@ def update_download_file(file_id: int, payload: dict, user: User = Depends(requi
     item.description = description or None
     db.commit()
     return {"message": "Informasi dokumen berhasil diperbarui.", "file": download_item_json(item)}
+
+@app.post("/api/admin/downloads/{file_id}/replace")
+async def replace_download_file(file_id: int, file: UploadFile = File(...), user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    item = db.get(DownloadFile, file_id)
+    if not item: raise HTTPException(status_code=404, detail="Dokumen tidak ditemukan.")
+    original = Path(file.filename or "").name; ext = Path(original).suffix.lower()
+    if ext not in DOWNLOAD_ALLOWED: raise HTTPException(status_code=400, detail="Format file belum didukung.")
+    content = await file.read(DOWNLOAD_MAX_BYTES + 1)
+    if not content or len(content) > DOWNLOAD_MAX_BYTES: raise HTTPException(status_code=400, detail="File kosong atau melebihi 25 MB.")
+    content_type = DOWNLOAD_ALLOWED[ext]; new_key = f"widya-trapsila/downloads/{uuid.uuid4().hex}{ext}"; client = r2_client(); bucket = os.environ["R2_BUCKET_NAME"]
+    try: client.put_object(Bucket=bucket, Key=new_key, Body=content, ContentType=content_type, Metadata={"original-name": quote(original[:200])})
+    except Exception: raise HTTPException(status_code=502, detail="Gagal mengunggah file pengganti ke cloud.")
+    old_key = item.object_key; item.object_key = new_key; item.original_name = original[:255]; item.content_type = content_type; item.file_size = len(content)
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        try: client.delete_object(Bucket=bucket, Key=new_key)
+        except Exception: pass
+        raise HTTPException(status_code=500, detail="Metadata file pengganti gagal disimpan.")
+    try: client.delete_object(Bucket=bucket, Key=old_key)
+    except Exception: logger.warning("File lama tidak berhasil dibersihkan dari R2: %s", old_key)
+    return {"message": "File dokumen berhasil diganti.", "file": download_item_json(item)}
 
 @app.delete("/api/admin/downloads/{file_id}")
 def delete_download_file(file_id: int, user: User = Depends(require_admin), db: Session = Depends(get_db)):
