@@ -88,3 +88,13 @@ Buat bucket R2 private dan token API dengan izin Object Read & Write hanya untuk
 - Define `stopChatPolling()` and initialize `chatPollTimer` before login/dashboard transitions.
 - Prevents `stopChatPolling is not defined` when an administrator logs in or a session returns to the login screen.
 - No database migration or new environment variables required.
+
+
+## v0.7.2 – R2 connection diagnostics
+
+- Adds an administrator-only `GET /api/admin/storage/r2-status` endpoint to test bucket connectivity.
+- Logs the underlying R2 client initialization / connection exception in Render logs without returning credentials.
+- Trims whitespace from R2 environment values and explicitly configures S3 Signature V4.
+- Does not change the existing download/chat UI or database schema.
+
+After deployment, an administrator can test the endpoint while logged in by opening the browser developer console or using an authenticated API client. The endpoint never returns access keys or secrets.

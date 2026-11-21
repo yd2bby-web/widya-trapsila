@@ -1,4 +1,5 @@
 import os
+import logging
 import secrets
 import string
 import re
@@ -23,6 +24,8 @@ from .models import Student, User, Officer, Program, DownloadFile, ChatMessage
 from .schemas import LoginInput, UserOut, OfficerInput, ProgramInput
 from .security import create_access_token, decode_access_token, hash_password, verify_password
 
+logger = logging.getLogger("widya_trapsila.storage")
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "static"
 TEMPLATE_FILE = BASE_DIR / "student_template.xlsx"
@@ -43,7 +46,7 @@ with engine.begin() as conn:
     if "photo_data" not in officer_columns:
         conn.execute(text("ALTER TABLE officers ADD COLUMN photo_data TEXT"))
 
-app = FastAPI(title="WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", version="0.7.0")
+app = FastAPI(title="WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", version="0.7.2")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 bearer = HTTPBearer(auto_error=False)
 
@@ -79,7 +82,7 @@ def create_bootstrap_admin():
 
 @app.get("/api/health")
 def health():
-    return {"status":"ok", "app":"WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", "version":"0.7.0"}
+    return {"status":"ok", "app":"WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", "version":"0.7.2"}
 
 
 @app.post("/api/auth/login")
@@ -354,19 +357,30 @@ DOWNLOAD_ALLOWED = {
 
 def r2_client():
     required = ["R2_ENDPOINT_URL", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET_NAME"]
-    missing = [name for name in required if not os.getenv(name)]
+    values = {name: (os.getenv(name) or "").strip() for name in required}
+    missing = [name for name, value in values.items() if not value]
     if missing:
-        raise HTTPException(status_code=503, detail="Penyimpanan dokumen belum dikonfigurasi. Hubungi administrator.")
+        logger.error("R2 configuration missing variables: %s", ", ".join(missing))
+        raise HTTPException(status_code=503, detail="Konfigurasi R2 belum lengkap: " + ", ".join(missing))
+    endpoint = values["R2_ENDPOINT_URL"].rstrip("/")
+    if not endpoint.startswith("https://"):
+        logger.error("R2_ENDPOINT_URL harus menggunakan HTTPS")
+        raise HTTPException(status_code=503, detail="R2_ENDPOINT_URL harus diawali https://")
     try:
         import boto3
+        from botocore.config import Config
         return boto3.client(
-            "s3", endpoint_url=os.environ["R2_ENDPOINT_URL"],
-            aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],
-            aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
+            "s3",
+            endpoint_url=endpoint,
+            aws_access_key_id=values["R2_ACCESS_KEY_ID"],
+            aws_secret_access_key=values["R2_SECRET_ACCESS_KEY"],
             region_name="auto",
+            config=Config(signature_version="s3v4", connect_timeout=8, read_timeout=20,
+                          retries={"max_attempts": 2, "mode": "standard"}),
         )
     except Exception:
-        raise HTTPException(status_code=503, detail="Layanan penyimpanan dokumen belum siap.")
+        logger.exception("Gagal menginisialisasi client Cloudflare R2")
+        raise HTTPException(status_code=503, detail="Client R2 gagal diinisialisasi. Periksa log Render untuk detail teknis.")
 
 def download_item_json(item: DownloadFile):
     return {
