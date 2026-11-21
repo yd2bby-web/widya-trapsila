@@ -1,4 +1,4 @@
-# WIDYA TRAPSILA v0.8.0 — Chat Konseling Privat
+# WIDYA TRAPSILA v0.8.1 — Chat Konseling Privat
 
 ## Fitur
 - Admin membuat akun konselor dengan username dan password awal (minimal 10 karakter).
@@ -18,7 +18,7 @@
 
 ```powershell
 git add app/main.py app/models.py static/index.html README.md
-git commit -m "WIDYA TRAPSILA v0.8.0 - Private Counseling Chat"
+git commit -m "WIDYA TRAPSILA v0.8.1 - Private Counseling Chat"
 git push origin main
 ```
 
@@ -37,3 +37,7 @@ Render akan deploy otomatis. Migrasi kolom dan pembuatan tabel baru berjalan saa
 - Akses percakapan dibatasi di backend berdasarkan identitas siswa dan konselor yang sedang ditugaskan.
 - Satu siswa hanya memiliki satu konselor utama pada satu waktu.
 - Percakapan disimpan sebagai data aplikasi biasa di database. Ini bukan enkripsi end-to-end; operator infrastruktur/database yang memiliki akses tingkat sistem secara teknis tetap dapat mengakses data. Terapkan kebijakan sekolah, persetujuan, dan prosedur perlindungan siswa sebelum digunakan untuk pengungkapan sensitif atau keadaan darurat.
+
+
+## v0.8.1 hotfix
+- Fix startup NameError by defining current_user and require_admin before routes that use them as dependencies.

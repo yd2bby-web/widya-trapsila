@@ -52,9 +52,24 @@ with engine.begin() as conn:
     if "counselor_user_id" not in student_cols:
         conn.execute(text("ALTER TABLE students ADD COLUMN counselor_user_id INTEGER REFERENCES users(id)" if engine.dialect.name == "postgresql" else "ALTER TABLE students ADD COLUMN counselor_user_id INTEGER REFERENCES users(id)"))
 
-app = FastAPI(title="WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", version="0.8.0")
+app = FastAPI(title="WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", version="0.8.1")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 bearer = HTTPBearer(auto_error=False)
+
+def current_user(credentials: HTTPAuthorizationCredentials | None = Depends(bearer), db: Session = Depends(get_db)) -> User:
+    if not credentials: raise HTTPException(status_code=401, detail="Silakan login")
+    try:
+        data = decode_access_token(credentials.credentials); user_id = int(data["sub"])
+    except (InvalidTokenError, KeyError, ValueError):
+        raise HTTPException(status_code=401, detail="Sesi login tidak valid atau kedaluwarsa")
+    user = db.get(User, user_id)
+    if not user or not user.is_active: raise HTTPException(status_code=401, detail="Akun tidak aktif")
+    return user
+
+def require_admin(user: User = Depends(current_user)) -> User:
+    if user.role not in {"super_admin", "admin"}: raise HTTPException(status_code=403, detail="Akses khusus administrator")
+    return user
+
 
 @app.on_event("startup")
 def create_bootstrap_admin():
@@ -157,7 +172,7 @@ def send_counseling_message(student_id: int, payload: dict, user: User = Depends
 
 @app.get("/api/health")
 def health():
-    return {"status":"ok", "app":"WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", "version":"0.7.2"}
+    return {"status":"ok", "app":"WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", "version":"0.8.1"}
 
 
 @app.post("/api/auth/login")
@@ -175,20 +190,6 @@ def login(payload: LoginInput, db: Session = Depends(get_db)):
         "password_change_required": user.password_change_required
     }
 
-
-def current_user(credentials: HTTPAuthorizationCredentials | None = Depends(bearer), db: Session = Depends(get_db)) -> User:
-    if not credentials: raise HTTPException(status_code=401, detail="Silakan login")
-    try:
-        data = decode_access_token(credentials.credentials); user_id = int(data["sub"])
-    except (InvalidTokenError, KeyError, ValueError):
-        raise HTTPException(status_code=401, detail="Sesi login tidak valid atau kedaluwarsa")
-    user = db.get(User, user_id)
-    if not user or not user.is_active: raise HTTPException(status_code=401, detail="Akun tidak aktif")
-    return user
-
-def require_admin(user: User = Depends(current_user)) -> User:
-    if user.role not in {"super_admin", "admin"}: raise HTTPException(status_code=403, detail="Akses khusus administrator")
-    return user
 
 @app.get("/api/chat/messages")
 def list_chat_messages(before_id: int | None = Query(default=None, ge=1),
