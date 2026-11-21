@@ -14,7 +14,7 @@ class User(Base):
     password_change_required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
     student_id: Mapped[int | None] = mapped_column(ForeignKey("students.id"), nullable=True, unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    student: Mapped["Student | None"] = relationship(back_populates="user")
+    student: Mapped["Student | None"] = relationship(back_populates="user", foreign_keys=[student_id])
 
 class Student(Base):
     __tablename__ = "students"
@@ -27,7 +27,7 @@ class Student(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     counselor_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    user: Mapped["User | None"] = relationship(back_populates="student", uselist=False)
+    user: Mapped["User | None"] = relationship(back_populates="student", uselist=False, foreign_keys="User.student_id")
 
 class Officer(Base):
     __tablename__ = "officers"
