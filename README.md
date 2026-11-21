@@ -65,3 +65,11 @@ Tambahkan environment variables berikut pada Render (jangan masukkan secret ke G
 - `R2_BUCKET_NAME`
 
 Buat bucket R2 private dan token API dengan izin Object Read & Write hanya untuk bucket tersebut.
+
+
+## v0.6.1 — Perbaikan akses Pusat Download siswa
+
+- Menambahkan tombol pintas Pusat Download pada header Area Siswa.
+- Menandai panel Pusat Download secara eksplisit agar tampil pada dashboard siswa.
+- Daftar dokumen dimuat saat dashboard siswa dibuka; filter kategori tetap tersedia.
+- Akses unduh tetap menggunakan endpoint terautentikasi.
