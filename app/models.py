@@ -25,6 +25,7 @@ class Student(Base):
     full_name: Mapped[str] = mapped_column(String(160))
     class_name: Mapped[str] = mapped_column(String(30), index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    counselor_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     user: Mapped["User | None"] = relationship(back_populates="student", uselist=False)
 
@@ -73,4 +74,14 @@ class DownloadFile(Base):
     content_type: Mapped[str] = mapped_column(String(120), nullable=False)
     file_size: Mapped[int] = mapped_column(Integer, nullable=False)
     uploaded_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+class CounselingMessage(Base):
+    __tablename__ = "counseling_messages"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    student_id: Mapped[int] = mapped_column(ForeignKey("students.id"), index=True, nullable=False)
+    counselor_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
+    sender_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)

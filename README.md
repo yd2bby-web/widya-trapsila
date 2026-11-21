@@ -1,100 +1,39 @@
-# PIK-R Digital Center — SMP Negeri 1 Wonogiri
+# WIDYA TRAPSILA v0.8.0 — Chat Konseling Privat
 
-Starter project tahap 1: FastAPI, SQLAlchemy, login JWT, role dasar, database SQLite lokal / PostgreSQL cloud, dan import data siswa XLSX.
+## Fitur
+- Admin membuat akun konselor dengan username dan password awal (minimal 10 karakter).
+- Admin menugaskan satu konselor utama untuk setiap siswa. Siswa yang sama dapat dipindahkan ke konselor lain.
+- Konselor melihat hanya daftar siswa yang ditugaskan kepadanya.
+- Siswa melihat konselor yang ditugaskan dan dapat mengirim pesan privat.
+- Pesan tersimpan di database Neon dan diperbarui otomatis setiap 5 detik pada panel siswa/konselor.
+- Chat konseling terpisah dari Chat Universal.
+- Endpoint pesan memeriksa hak akses pada server untuk setiap permintaan; admin tidak memiliki endpoint untuk membaca isi percakapan.
+- Perubahan database bersifat additive: menambah `students.counselor_user_id` dan tabel `counseling_messages`. Data siswa, akun, chat universal, dan dokumen yang ada tidak dihapus.
 
-## Menjalankan di Windows (PowerShell)
+## Instalasi
+1. Ekstrak ZIP ke folder proyek lama.
+2. Salin/replace file proyek. Jangan timpa `.env` dan jangan hapus `.git` lokal.
+3. Pastikan `requirements.txt` tetap digunakan seperti versi sebelumnya.
+4. Jalankan:
 
-1. Install Python 3.12.
-2. Buka folder proyek di VS Code atau terminal.
-3. Buat virtual environment:
+```powershell
+git add app/main.py app/models.py static/index.html README.md
+git commit -m "WIDYA TRAPSILA v0.8.0 - Private Counseling Chat"
+git push origin main
+```
 
-   ```powershell
-   py -3.12 -m venv .venv
-   .\.venv\Scripts\Activate.ps1
-   pip install -r requirements.txt
-   ```
+Render akan deploy otomatis. Migrasi kolom dan pembuatan tabel baru berjalan saat aplikasi startup. Tidak ada Environment variable baru.
 
-4. Salin `.env.example` menjadi `.env`, lalu ganti `SECRET_KEY` dan password admin.
-5. Jalankan:
+## Cara menggunakan
+1. Login sebagai admin → menu **Konselor**.
+2. Buat akun konselor. Berikan username dan password awal secara pribadi kepada konselor.
+3. Pilih siswa dan konselor pada bagian **Penugasan Konselor**, lalu simpan.
+4. Konselor login memakai akun yang dibuat admin, pilih siswa binaan, lalu mulai percakapan.
+5. Siswa login seperti biasa; panel **Konseling Privat** muncul setelah konselor ditugaskan.
+6. Konselor dan siswa dapat mengganti password melalui panel masing-masing.
 
-   ```powershell
-   uvicorn app.main:app --reload
-   ```
-
-6. Buka `http://127.0.0.1:8000` dan dokumentasi API di `http://127.0.0.1:8000/docs`.
-
-## Akun admin awal
-
-Diambil dari `BOOTSTRAP_ADMIN_USERNAME` dan `BOOTSTRAP_ADMIN_PASSWORD` dalam `.env`. Ganti password contoh sebelum menjalankan aplikasi dan jangan unggah file `.env` ke GitHub.
-
-## Template Excel
-
-File `student_template.xlsx` sudah disertakan. Header wajib: `NIS | Nama Siswa | Kelas`. Kolom keempat `NISN` bersifat opsional.
-
-Import: `POST /api/admin/students/import` dengan Bearer token admin dan file `.xlsx`.
-
-## Catatan penting sebelum dipakai siswa
-
-Ini fondasi pengembangan, belum siap produksi. Sebelum data siswa asli dimasukkan, perlu ditambahkan migrasi database, reset password, verifikasi akun, pembatasan percobaan login, audit log, backup otomatis, persetujuan sekolah/orang tua sesuai kebijakan, kebijakan privasi, dan pengamanan konseling. Jangan gunakan data siswa asli pada tahap uji coba.
-
-
-## Update v0.4.0 — Akun Siswa
-
-- Administrator dapat membuat akun untuk seluruh siswa aktif yang belum memiliki akun.
-- Username siswa menggunakan NIS.
-- Password awal dibuat acak per siswa dan hanya ditampilkan satu kali untuk diunduh sebagai CSV.
-- Siswa dapat login dari halaman yang sama dan melihat identitasnya.
-- Password awal wajib diganti dengan password pribadi minimal 10 karakter.
-- Penambahan kolom `users.password_change_required` dilakukan otomatis secara aditif saat aplikasi dijalankan.
-
-Catatan operasional:
-1. Import data siswa terlebih dahulu.
-2. Masuk sebagai administrator, buka menu **Akun Siswa**, lalu pilih **Buat Akun Siswa**.
-3. Unduh CSV kredensial dan bagikan hanya kepada siswa yang bersangkutan.
-4. Jangan kirim file CSV kredensial melalui grup umum.
-
-
-## Pusat Download (v0.6.0)
-
-Pusat Download memakai bucket Cloudflare R2 private. Metadata dokumen berada di Neon; file biner disimpan di R2. Admin mengunggah melalui menu Pusat Download, sedangkan siswa harus login untuk melihat dan mengunduh. Link unduhan bertanda tangan berlaku 10 menit. Batas file 25 MB.
-
-Tambahkan environment variables berikut pada Render (jangan masukkan secret ke GitHub):
-- `R2_ENDPOINT_URL` = `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`
-- `R2_ACCESS_KEY_ID`
-- `R2_SECRET_ACCESS_KEY`
-- `R2_BUCKET_NAME`
-
-Buat bucket R2 private dan token API dengan izin Object Read & Write hanya untuk bucket tersebut.
-
-
-## v0.6.1 — Perbaikan akses Pusat Download siswa
-
-- Menambahkan tombol pintas Pusat Download pada header Area Siswa.
-- Menandai panel Pusat Download secara eksplisit agar tampil pada dashboard siswa.
-- Daftar dokumen dimuat saat dashboard siswa dibuka; filter kategori tetap tersedia.
-- Akses unduh tetap menggunakan endpoint terautentikasi.
-
-
-## v0.7.0 – Chat Universal
-- Ruang chat grup bersama untuk akun siswa dan pengelola yang sudah login.
-- Pesan tersimpan di database Neon/PostgreSQL.
-- Pembaruan otomatis berkala setiap 5 detik (tanpa WebSocket).
-- Admin dapat memoderasi dengan menghapus pesan.
-- Batas pesan 1.000 karakter; teks ditampilkan sebagai teks biasa untuk mencegah injeksi HTML.
-
-
-## v0.7.1 – Chat polling fix
-
-- Define `stopChatPolling()` and initialize `chatPollTimer` before login/dashboard transitions.
-- Prevents `stopChatPolling is not defined` when an administrator logs in or a session returns to the login screen.
-- No database migration or new environment variables required.
-
-
-## v0.7.2 – R2 connection diagnostics
-
-- Adds an administrator-only `GET /api/admin/storage/r2-status` endpoint to test bucket connectivity.
-- Logs the underlying R2 client initialization / connection exception in Render logs without returning credentials.
-- Trims whitespace from R2 environment values and explicitly configures S3 Signature V4.
-- Does not change the existing download/chat UI or database schema.
-
-After deployment, an administrator can test the endpoint while logged in by opening the browser developer console or using an authenticated API client. The endpoint never returns access keys or secrets.
+## Catatan privasi
+- Admin mengelola akun dan penugasan, tetapi aplikasi tidak menyediakan tampilan admin untuk membaca pesan konseling.
+- Akses percakapan dibatasi di backend berdasarkan identitas siswa dan konselor yang sedang ditugaskan.
+- Satu siswa hanya memiliki satu konselor utama pada satu waktu.
+- Percakapan disimpan sebagai data aplikasi biasa di database. Ini bukan enkripsi end-to-end; operator infrastruktur/database yang memiliki akses tingkat sistem secara teknis tetap dapat mengakses data. Terapkan kebijakan sekolah, persetujuan, dan prosedur perlindungan siswa sebelum digunakan untuk pengungkapan sensitif atau keadaan darurat.

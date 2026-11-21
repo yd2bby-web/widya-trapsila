@@ -20,7 +20,7 @@ from sqlalchemy import select, or_, text
 from sqlalchemy.orm import Session
 from jwt import InvalidTokenError
 from .database import Base, engine, get_db, SessionLocal
-from .models import Student, User, Officer, Program, DownloadFile, ChatMessage
+from .models import Student, User, Officer, Program, DownloadFile, ChatMessage, CounselingMessage
 from .schemas import LoginInput, UserOut, OfficerInput, ProgramInput
 from .security import create_access_token, decode_access_token, hash_password, verify_password
 
@@ -46,7 +46,13 @@ with engine.begin() as conn:
     if "photo_data" not in officer_columns:
         conn.execute(text("ALTER TABLE officers ADD COLUMN photo_data TEXT"))
 
-app = FastAPI(title="WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", version="0.7.2")
+# Additive counseling assignment migration. Existing students remain unassigned until admin assigns a counselor.
+with engine.begin() as conn:
+    student_cols = {col["name"] for col in inspect(engine).get_columns("students")}
+    if "counselor_user_id" not in student_cols:
+        conn.execute(text("ALTER TABLE students ADD COLUMN counselor_user_id INTEGER REFERENCES users(id)" if engine.dialect.name == "postgresql" else "ALTER TABLE students ADD COLUMN counselor_user_id INTEGER REFERENCES users(id)"))
+
+app = FastAPI(title="WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", version="0.8.0")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 bearer = HTTPBearer(auto_error=False)
 
@@ -79,6 +85,75 @@ def create_bootstrap_admin():
             db.commit()
     finally:
         db.close()
+
+@app.post("/api/admin/counselors")
+def create_counselor(payload: dict, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    full_name = str(payload.get("full_name", "")).strip()
+    username = str(payload.get("username", "")).strip()
+    password = str(payload.get("password", ""))
+    if not full_name or not username or len(password) < 10:
+        raise HTTPException(status_code=400, detail="Nama, username, dan password minimal 10 karakter wajib diisi.")
+    if db.scalar(select(User).where(User.username == username)):
+        raise HTTPException(status_code=409, detail="Username sudah digunakan.")
+    counselor = User(username=username, full_name=full_name, password_hash=hash_password(password), role="counselor", is_active=True, password_change_required=True)
+    db.add(counselor); db.commit(); db.refresh(counselor)
+    return {"id": counselor.id, "username": counselor.username, "full_name": counselor.full_name, "message": "Akun konselor berhasil dibuat."}
+
+@app.get("/api/admin/counselors")
+def list_counselors(user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    rows = db.scalars(select(User).where(User.role == "counselor", User.is_active.is_(True)).order_by(User.full_name)).all()
+    return [{"id": c.id, "username": c.username, "full_name": c.full_name, "assigned_students": db.query(Student).filter(Student.counselor_user_id == c.id).count()} for c in rows]
+
+@app.post("/api/admin/counselors/assign")
+def assign_counselor(payload: dict, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    student = db.get(Student, int(payload.get("student_id", 0)))
+    counselor = db.get(User, int(payload.get("counselor_user_id", 0)))
+    if not student or not student.is_active: raise HTTPException(status_code=404, detail="Siswa tidak ditemukan atau tidak aktif.")
+    if not counselor or counselor.role != "counselor" or not counselor.is_active: raise HTTPException(status_code=404, detail="Akun konselor tidak ditemukan atau tidak aktif.")
+    student.counselor_user_id = counselor.id; db.commit()
+    return {"message": f"Konselor {counselor.full_name} ditugaskan kepada {student.full_name}."}
+
+@app.get("/api/counseling/me")
+def counseling_me(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    if user.role != "student" or not user.student_id: raise HTTPException(status_code=403, detail="Akses khusus siswa.")
+    student = db.get(Student, user.student_id)
+    if not student or not student.counselor_user_id: raise HTTPException(status_code=404, detail="Belum ada konselor yang ditugaskan. Hubungi administrator.")
+    counselor = db.get(User, student.counselor_user_id)
+    if not counselor or not counselor.is_active: raise HTTPException(status_code=404, detail="Konselor belum tersedia.")
+    return {"student_id": student.id, "counselor_name": counselor.full_name}
+
+@app.get("/api/counseling/students")
+def counselor_students(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    if user.role != "counselor": raise HTTPException(status_code=403, detail="Akses khusus konselor.")
+    rows = db.scalars(select(Student).where(Student.counselor_user_id == user.id, Student.is_active.is_(True)).order_by(Student.class_name, Student.full_name)).all()
+    return [{"id": s.id, "name": s.full_name, "class_name": s.class_name, "nis": s.nis} for s in rows]
+
+def _counseling_access(student_id: int, user: User, db: Session):
+    student = db.get(Student, student_id)
+    if not student or not student.is_active: raise HTTPException(status_code=404, detail="Siswa tidak ditemukan.")
+    if user.role == "student" and user.student_id == student.id and student.counselor_user_id:
+        counselor_id = student.counselor_user_id
+    elif user.role == "counselor" and student.counselor_user_id == user.id:
+        counselor_id = user.id
+    else:
+        raise HTTPException(status_code=403, detail="Anda tidak memiliki akses ke percakapan konseling ini.")
+    return student, counselor_id
+
+@app.get("/api/counseling/{student_id}/messages")
+def counseling_messages(student_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    student, counselor_id = _counseling_access(student_id, user, db)
+    rows = db.scalars(select(CounselingMessage).where(CounselingMessage.student_id == student.id, CounselingMessage.counselor_user_id == counselor_id).order_by(CounselingMessage.id).limit(200)).all()
+    return [{"id": m.id, "sender": "Saya" if m.sender_user_id == user.id else (db.get(User, counselor_id).full_name if user.role == "student" else student.full_name), "message": m.message, "created_at": m.created_at.isoformat() if m.created_at else None, "mine": m.sender_user_id == user.id} for m in rows]
+
+@app.post("/api/counseling/{student_id}/messages")
+def send_counseling_message(student_id: int, payload: dict, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    student, counselor_id = _counseling_access(student_id, user, db)
+    message = str(payload.get("message", "")).strip()
+    if not message: raise HTTPException(status_code=400, detail="Pesan tidak boleh kosong.")
+    if len(message) > 2000: raise HTTPException(status_code=400, detail="Pesan maksimal 2.000 karakter.")
+    row = CounselingMessage(student_id=student.id, counselor_user_id=counselor_id, sender_user_id=user.id, message=message)
+    db.add(row); db.commit(); db.refresh(row)
+    return {"id": row.id, "message": "Pesan konseling terkirim."}
 
 @app.get("/api/health")
 def health():
