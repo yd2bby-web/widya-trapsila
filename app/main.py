@@ -567,5 +567,10 @@ def delete_download_file(file_id: int, user: User = Depends(require_admin), db: 
     db.delete(item); db.commit()
     return {"message": "Dokumen berhasil dihapus."}
 
+@app.get("/service-worker.js", include_in_schema=False)
+def service_worker():
+    return FileResponse(str(BASE_DIR / "service-worker.js"), media_type="application/javascript",
+                        headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
+
 @app.get("/")
 def home(): return FileResponse(str(STATIC_DIR/"index.html"))
