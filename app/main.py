@@ -21,8 +21,8 @@ from sqlalchemy import select, or_, text, case, func
 from sqlalchemy.orm import Session
 from jwt import InvalidTokenError
 from .database import Base, engine, get_db, SessionLocal
-from .models import Student, User, Officer, Program, DownloadFile, ChatMessage, CounselingMessage, Announcement, NotificationRead
-from .schemas import LoginInput, UserOut, OfficerInput, ProgramInput
+from .models import Student, User, Officer, Program, DownloadFile, ChatMessage, CounselingMessage, Announcement, NotificationRead, Member
+from .schemas import LoginInput, UserOut, OfficerInput, ProgramInput, MemberInput
 from .security import create_access_token, decode_access_token, hash_password, verify_password
 
 logger = logging.getLogger("widya_trapsila.storage")
@@ -610,6 +610,60 @@ def delete_announcement(announcement_id: int, user: User = Depends(require_admin
     row = db.get(Announcement, announcement_id)
     if not row: raise HTTPException(status_code=404, detail="Pengumuman tidak ditemukan.")
     db.delete(row); db.commit(); return {"message": "Pengumuman berhasil dihapus."}
+
+@app.get("/api/admin/members")
+def list_members(user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    rows = db.scalars(select(Member).order_by(Member.full_name)).all()
+    return [{"id": x.id, "nis": x.nis, "full_name": x.full_name,
+             "class_name": x.class_name, "gender": x.gender,
+             "photo_data": x.photo_data, "joined_at": x.joined_at,
+             "is_active": x.is_active} for x in rows]
+
+@app.post("/api/admin/members")
+def add_member(payload: MemberInput, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    data = payload.model_dump()
+    data["full_name"] = data["full_name"].strip()
+    data["class_name"] = data["class_name"].strip()
+    if not data["full_name"] or not data["class_name"]:
+        raise HTTPException(status_code=422, detail="Nama dan kelas wajib diisi.")
+    if data.get("nis"):
+        data["nis"] = data["nis"].strip() or None
+        if data["nis"] and db.scalar(select(Member).where(Member.nis == data["nis"])):
+            raise HTTPException(status_code=409, detail="NIS anggota sudah terdaftar.")
+    item = Member(**data); db.add(item); db.commit(); db.refresh(item)
+    return {"id": item.id, "message": "Anggota berhasil ditambahkan."}
+
+@app.put("/api/admin/members/{member_id}")
+def update_member(member_id: int, payload: MemberInput, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    item = db.get(Member, member_id)
+    if not item: raise HTTPException(status_code=404, detail="Anggota tidak ditemukan.")
+    data = payload.model_dump()
+    data["full_name"] = data["full_name"].strip()
+    data["class_name"] = data["class_name"].strip()
+    if not data["full_name"] or not data["class_name"]:
+        raise HTTPException(status_code=422, detail="Nama dan kelas wajib diisi.")
+    if data.get("nis"):
+        data["nis"] = data["nis"].strip() or None
+        duplicate = db.scalar(select(Member).where(Member.nis == data["nis"], Member.id != member_id))
+        if duplicate: raise HTTPException(status_code=409, detail="NIS anggota sudah digunakan.")
+    for key, value in data.items(): setattr(item, key, value)
+    db.commit()
+    return {"message": "Data anggota berhasil diperbarui."}
+
+@app.patch("/api/admin/members/{member_id}/status")
+def set_member_status(member_id: int, payload: dict, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    item = db.get(Member, member_id)
+    if not item: raise HTTPException(status_code=404, detail="Anggota tidak ditemukan.")
+    if "is_active" not in payload: raise HTTPException(status_code=422, detail="Status wajib diisi.")
+    item.is_active = bool(payload["is_active"]); db.commit()
+    return {"message": "Status anggota diperbarui."}
+
+@app.delete("/api/admin/members/{member_id}")
+def delete_member(member_id: int, user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    item = db.get(Member, member_id)
+    if not item: raise HTTPException(status_code=404, detail="Anggota tidak ditemukan.")
+    db.delete(item); db.commit()
+    return {"message": "Data anggota berhasil dihapus."}
 
 @app.get("/api/public/officers")
 def public_officers(db: Session = Depends(get_db)):

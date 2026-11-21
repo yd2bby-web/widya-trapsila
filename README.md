@@ -34,3 +34,12 @@ Pemeriksaan sintaks Python dan JavaScript dilakukan pada paket ini. Uji integras
 - Dashboard siswa memiliki panel Pengumuman yang dikelola administrator.
 - Login menampilkan pilihan Administrator, Siswa, dan Konselor serta memvalidasi role di server.
 - Kartu pengurus publik hanya menampilkan foto yang benar-benar diunggah; tidak memakai foto pengganti.
+
+
+## WIDYA TRAPSILA v0.9.3
+- Menambahkan menu Data Anggota PIK-R khusus administrator.
+- Data anggota terpisah dari Data Pengurus dan tidak membuat akun login.
+- Mendukung tambah, edit, aktif/nonaktif, dan hapus dengan konfirmasi.
+- Kolom data: NIS opsional, nama, kelas, jenis kelamin opsional, foto opsional, tanggal bergabung.
+- Tabel `members` dibuat otomatis melalui `Base.metadata.create_all` saat aplikasi mulai.
+- API anggota dibatasi untuk administrator.

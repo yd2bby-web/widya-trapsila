@@ -36,3 +36,13 @@ class ProgramInput(BaseModel):
     description: str | None = None
     event_date: str | None = None
     status: str = "Direncanakan"
+
+
+class MemberInput(BaseModel):
+    nis: str | None = None
+    full_name: str
+    class_name: str
+    gender: str | None = None
+    photo_data: str | None = None
+    joined_at: str | None = None
+    is_active: bool = True

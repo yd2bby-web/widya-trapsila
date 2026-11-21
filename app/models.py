@@ -107,3 +107,16 @@ class NotificationRead(Base):
     notification_type: Mapped[str] = mapped_column(String(30), nullable=False)
     item_id: Mapped[int] = mapped_column(Integer, nullable=False)
     read_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class Member(Base):
+    __tablename__ = "members"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    nis: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
+    full_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    class_name: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    gender: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    photo_data: Mapped[str | None] = mapped_column(Text, nullable=True)
+    joined_at: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
