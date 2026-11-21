@@ -97,3 +97,13 @@ class Announcement(Base):
     is_pinned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     published_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class NotificationRead(Base):
+    __tablename__ = "notification_reads"
+    __table_args__ = (UniqueConstraint("user_id", "notification_type", "item_id", name="uq_notification_read"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
+    notification_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    item_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    read_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)

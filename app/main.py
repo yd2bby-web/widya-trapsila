@@ -21,7 +21,7 @@ from sqlalchemy import select, or_, text, case, func
 from sqlalchemy.orm import Session
 from jwt import InvalidTokenError
 from .database import Base, engine, get_db, SessionLocal
-from .models import Student, User, Officer, Program, DownloadFile, ChatMessage, CounselingMessage, Announcement
+from .models import Student, User, Officer, Program, DownloadFile, ChatMessage, CounselingMessage, Announcement, NotificationRead
 from .schemas import LoginInput, UserOut, OfficerInput, ProgramInput
 from .security import create_access_token, decode_access_token, hash_password, verify_password
 
@@ -236,9 +236,60 @@ def send_counseling_message(student_id: int, payload: dict, user: User = Depends
     db.add(row); db.commit(); db.refresh(row)
     return {"id": row.id, "message": "Pesan konseling terkirim."}
 
+@app.get("/api/student/notifications/count")
+def student_notification_count(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    if user.role != "student" or not user.student_id:
+        raise HTTPException(status_code=403, detail="Akses khusus siswa.")
+    read_ann = select(NotificationRead.item_id).where(
+        NotificationRead.user_id == user.id, NotificationRead.notification_type == "announcement"
+    )
+    unread_ann = db.scalar(select(func.count(Announcement.id)).where(
+        Announcement.is_active.is_(True), ~Announcement.id.in_(read_ann)
+    )) or 0
+    student = db.get(Student, user.student_id)
+    unread_chat = 0
+    if student and student.counselor_user_id:
+        read_chat = select(NotificationRead.item_id).where(
+            NotificationRead.user_id == user.id, NotificationRead.notification_type == "counseling"
+        )
+        unread_chat = db.scalar(select(func.count(CounselingMessage.id)).where(
+            CounselingMessage.student_id == student.id,
+            CounselingMessage.counselor_user_id == student.counselor_user_id,
+            CounselingMessage.sender_user_id != user.id,
+            ~CounselingMessage.id.in_(read_chat)
+        )) or 0
+    return {"count": int(unread_ann + unread_chat)}
+
+@app.post("/api/student/notifications/read")
+def mark_student_notification_read(payload: dict, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    if user.role != "student" or not user.student_id:
+        raise HTTPException(status_code=403, detail="Akses khusus siswa.")
+    kind = str(payload.get("type", "")).strip()
+    try: item_id = int(payload.get("id", 0))
+    except (TypeError, ValueError): item_id = 0
+    if kind == "announcement":
+        item = db.get(Announcement, item_id)
+        if not item or not item.is_active:
+            raise HTTPException(status_code=404, detail="Pengumuman tidak ditemukan.")
+    elif kind == "counseling":
+        student = db.get(Student, user.student_id)
+        item = db.get(CounselingMessage, item_id)
+        if not student or not item or item.student_id != student.id or item.counselor_user_id != student.counselor_user_id or item.sender_user_id == user.id:
+            raise HTTPException(status_code=404, detail="Pesan konseling tidak ditemukan.")
+    else:
+        raise HTTPException(status_code=422, detail="Jenis notifikasi tidak valid.")
+    exists = db.scalar(select(NotificationRead.id).where(
+        NotificationRead.user_id == user.id, NotificationRead.notification_type == kind,
+        NotificationRead.item_id == item_id
+    ))
+    if not exists:
+        db.add(NotificationRead(user_id=user.id, notification_type=kind, item_id=item_id))
+        db.commit()
+    return {"message": "Notifikasi ditandai sudah dibaca."}
+
 @app.get("/api/health")
 def health():
-    return {"status":"ok", "app":"WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", "version":"0.9.1"}
+    return {"status":"ok", "app":"WIDYA TRAPSILA | PIK-R SMP Negeri 1 Wonogiri", "version":"0.9.2"}
 
 
 @app.post("/api/auth/login")
