@@ -82,9 +82,11 @@ def create_bootstrap_admin():
         if not db.scalar(select(User).where(User.username == username)):
             db.add(User(username=username, full_name="Administrator WIDYA TRAPSILA", password_hash=hash_password(password), role="super_admin"))
             db.commit()
+        # Jangan membuat baris Ketua Khansa otomatis jika sudah ada entri
+        # Ketua dengan variasi penulisan jabatan (mis. "KETUA").
         chair = db.scalar(select(Officer).where(
-            Officer.position == "Ketua PIK-R",
-            Officer.full_name == "KHANSA PUTRI"
+            Officer.full_name.ilike("KHANSA PUTRI"),
+            Officer.position.ilike("%ketua%")
         ))
         if not chair:
             db.add(Officer(
@@ -414,7 +416,9 @@ def set_officer_status(officer_id:int,payload:dict,user:User=Depends(require_adm
 def delete_officer(officer_id:int,user:User=Depends(require_admin),db:Session=Depends(get_db)):
     item=db.get(Officer,officer_id)
     if not item: raise HTTPException(status_code=404,detail="Pengurus tidak ditemukan")
-    item.is_active=False; db.commit(); return {"message":"Pengurus dinonaktifkan"}
+    db.delete(item)
+    db.commit()
+    return {"message":"Data pengurus berhasil dihapus permanen."}
 
 @app.get("/api/admin/programs")
 def list_programs(user:User=Depends(require_admin),db:Session=Depends(get_db)):
